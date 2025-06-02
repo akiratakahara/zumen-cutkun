@@ -1,4 +1,4 @@
 pillow
 pymupdf
-opencv-python
+opencv-python-headless
 reportlab
