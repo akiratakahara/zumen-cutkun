@@ -7,12 +7,13 @@ import numpy as np
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
+from streamlit_drawable_canvas import st_canvas
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
-st.markdown("🖼 **テンプレ画像は赤い四角の部分に自動で貼り付けられます**")
+st.markdown("🖼 **テンプレ画像は赤い四角の部分に自動で貼り付けられます（合成時には赤は自動で消去！）**")
 st.markdown("⚠️ **テンプレ画像は300DPI以上推奨です！印刷が綺麗になります。**")
 
 uploaded_pdf = st.file_uploader("図面PDF または 画像", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=False)
@@ -55,6 +56,16 @@ def find_red_area(template_img: Image.Image):
         return (min_x, min_y, max_x + 1, max_y + 1)
     return None
 
+def remove_red_area(template_img: Image.Image, red_area, fill=(255,255,255,255)):
+    img = template_img.copy().convert("RGBA")
+    x1, y1, x2, y2 = red_area
+    for y in range(y1, y2):
+        for x in range(x1, x2):
+            r, g, b, *a = img.getpixel((x, y))
+            if r > 200 and g < 60 and b < 60:
+                img.putpixel((x, y), fill)
+    return img
+
 def generate_pdf(cropped: Image.Image, template: Image.Image):
     red_area = find_red_area(template)
     if red_area is None:
@@ -70,8 +81,9 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
     paste_x = x1 + (area_w - new_w) // 2
     paste_y = y1 + (area_h - new_h) // 2
 
-    template = template.convert("RGBA")
-    combined = template.copy()
+    # ★赤枠エリアを白で消してから合成！
+    cleared_template = remove_red_area(template, red_area, fill=(255,255,255,255))
+    combined = cleared_template.copy()
     combined.alpha_composite(resized_crop.convert("RGBA"), (paste_x, paste_y))
 
     img_buffer = io.BytesIO()
@@ -89,6 +101,7 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
 
 if uploaded_pdf and uploaded_template:
     with st.spinner("処理中..."):
+        # 読み込み
         if uploaded_pdf.name.lower().endswith(".pdf"):
             doc = fitz.open(stream=uploaded_pdf.read(), filetype="pdf")
             page = doc.load_page(0)
@@ -97,8 +110,58 @@ if uploaded_pdf and uploaded_template:
         else:
             img = Image.open(uploaded_pdf).convert("RGB")
 
+        st.subheader("自動帯検出 → プレビュー")
         selected_area = auto_detect_drawing_area(img)
         cropped = img.crop(selected_area)
+        st.image(cropped, caption="自動認識範囲プレビュー（修正したい場合は下へ）", use_column_width=True)
+        
+        manual_mode = st.checkbox("手動で範囲を指定する（自動認識がおかしい場合）")
+        if manual_mode:
+            st.write("画像上でドラッグして範囲指定できます")
+            canvas_result = st_canvas(
+                fill_color="rgba(255,0,0,0.3)",
+                stroke_width=3,
+                background_image=img,
+                update_streamlit=True,
+                height=img.height,
+                width=img.width,
+                drawing_mode="rect",
+                key="manual_rect"
+            )
+            if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
+                obj = canvas_result.json_data["objects"][0]
+                mx, my = int(obj["left"]), int(obj["top"])
+                mw, mh = int(obj["width"]), int(obj["height"])
+                manual_crop = img.crop((mx, my, mx+mw, my+mh))
+                cropped = manual_crop
+                st.image(cropped, caption="手動選択範囲プレビュー", use_column_width=True)
+                st.success("この範囲でPDF生成可能！")
+
+        # 塗りつぶし（スポイト→範囲指定→塗りつぶし）
+        st.subheader("任意の範囲を塗りつぶし（例：業者ロゴ消し）")
+        color_pick = st.color_picker("塗りつぶし色を選ぶ（もしくは画像をクリックでスポイト）", "#FFFFFF")
+        fill_mode = st.checkbox("塗りつぶしモードON")
+        fill_img = cropped.copy()
+        if fill_mode:
+            fill_canvas = st_canvas(
+                fill_color=color_pick + "80",  # 半透明
+                stroke_width=0,
+                background_image=fill_img,
+                update_streamlit=True,
+                height=fill_img.height,
+                width=fill_img.width,
+                drawing_mode="rect",
+                key="fill_rect"
+            )
+            if fill_canvas.json_data and len(fill_canvas.json_data["objects"]) > 0:
+                obj = fill_canvas.json_data["objects"][0]
+                fx, fy = int(obj["left"]), int(obj["top"])
+                fw, fh = int(obj["width"]), int(obj["height"])
+                draw = ImageDraw.Draw(fill_img)
+                draw.rectangle([fx, fy, fx+fw, fy+fh], fill=color_pick)
+                st.image(fill_img, caption="塗りつぶし後プレビュー", use_column_width=True)
+                cropped = fill_img  # 上書きしてOK
+
         template = Image.open(uploaded_template).convert("RGBA")
         result_pdf = generate_pdf(cropped, template)
 
