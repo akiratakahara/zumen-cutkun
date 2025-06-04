@@ -121,7 +121,7 @@ if uploaded_pdf and uploaded_template:
             canvas_result = st_canvas(
                 fill_color="rgba(255,0,0,0.3)",
                 stroke_width=3,
-                background_image=img,
+                background_image=np.array(img),  # ←ここを修正
                 update_streamlit=True,
                 height=img.height,
                 width=img.width,
