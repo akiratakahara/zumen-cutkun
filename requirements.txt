@@ -3,3 +3,4 @@ pymupdf
 opencv-python-headless
 reportlab
 streamlit
+streamlit-image-coordinates

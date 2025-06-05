@@ -7,6 +7,7 @@ import numpy as np
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
+from streamlit_image_coordinates import image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
@@ -68,34 +69,25 @@ def remove_red_area(template_img: Image.Image, red_area, fill=(255,255,255,255))
     return img
 
 def draw_grid(image: Image.Image, grid_step=100, color=(0, 255, 0), width=2, label_color=(255,0,0)):
-    """画像に目安のグリッド線と大きめの目盛り数字・軸ラベルを描画して返す"""
     img = image.copy()
     draw = ImageDraw.Draw(img)
     w, h = img.size
-    # フォントサイズを大きめに
     try:
         font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=28)
     except Exception:
-        font = None  # フォントがなければデフォルト
-
-    # 縦線＋横軸（X軸）ラベル
+        font = None
     for x in range(0, w, grid_step):
         draw.line([(x, 0), (x, h)], fill=color, width=width)
         draw.text((x+4, 8), str(x), fill=label_color, font=font)
-
-    # 横線＋縦軸（Y軸）ラベル
     for y in range(0, h, grid_step):
         draw.line([(0, y), (w, y)], fill=color, width=width)
         draw.text((8, y+4), str(y), fill=label_color, font=font)
-
-    # 軸ラベル
     if font:
         draw.text((w//2-40, 8), "横軸(px)", fill=(0,0,255), font=font)
         draw.text((8, h//2-20), "縦軸(px)", fill=(0,0,255), font=font)
     else:
         draw.text((w//2-40, 8), "横軸(px)", fill=(0,0,255))
         draw.text((8, h//2-20), "縦軸(px)", fill=(0,0,255))
-
     return img
 
 def generate_pdf(cropped: Image.Image, template: Image.Image):
@@ -150,14 +142,23 @@ if uploaded_pdf and uploaded_template:
         preview_width = st.slider("プレビュー画像の幅(px)", min_value=300, max_value=1200, value=600, step=50)
 
         st.subheader("【1】帯認識・手動微調整")
-        manual_mode = st.checkbox("手動で範囲を指定（自動認識値が初期値です。必要なら微調整してOK）")
+        manual_mode = st.checkbox("手動で範囲を指定（クリックで座標取得も可能）")
         if manual_mode:
-            x = st.number_input("横位置（px）", min_value=0, max_value=img.width-1, value=auto_x)
-            y = st.number_input("縦位置（px）", min_value=0, max_value=img.height-1, value=auto_y)
-            w = st.number_input("幅（px）", min_value=1, max_value=img.width-x, value=auto_w)
-            h = st.number_input("高さ（px）", min_value=1, max_value=img.height-y, value=auto_h)
+            cropped = img.crop((auto_x, auto_y, auto_x + auto_w, auto_y + auto_h))
+            grid_img = draw_grid(cropped, grid_step=100)
+            st.write("下の画像をクリックすると、範囲指定の左上座標に反映されます。")
+            coords = image_coordinates(grid_img, key="manual_select")
+            if coords is not None:
+                mx, my = int(coords["x"]), int(coords["y"])
+                st.info(f"クリック座標: 横位置={mx}, 縦位置={my}")
+            else:
+                mx, my = auto_x, auto_y
+
+            x = st.number_input("範囲の左上 横位置（px）", min_value=0, max_value=img.width-1, value=mx, key="manual_x")
+            y = st.number_input("範囲の左上 縦位置（px）", min_value=0, max_value=img.height-1, value=my, key="manual_y")
+            w = st.number_input("幅（px）", min_value=1, max_value=img.width-x, value=auto_w, key="manual_w")
+            h = st.number_input("高さ（px）", min_value=1, max_value=img.height-y, value=auto_h, key="manual_h")
             cropped = img.crop((x, y, x + w, y + h))
-            # グリッド付きプレビュー
             grid_img = draw_grid(cropped, grid_step=100)
             st.image(grid_img, caption="手動選択範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
             st.success("この範囲でPDF生成可能！")
@@ -166,22 +167,29 @@ if uploaded_pdf and uploaded_template:
             grid_img = draw_grid(cropped, grid_step=100)
             st.image(grid_img, caption="自動認識範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
 
-        # 【2】塗りつぶし（色ピッカー＋スポイト仮）
-        st.subheader("【2】画像の一部を塗りつぶす（ロゴ・社名隠し等）")
+        # 【2】塗りつぶし（スポイト対応）
+        st.subheader("【2】画像の一部を塗りつぶす（画像クリックで色取得も可能）")
         fill_mode = st.checkbox("塗りつぶしON")
         fill_img = cropped.copy()
-        if fill_mode:
-            fx = st.number_input("塗りつぶし開始 横位置（px）", min_value=0, max_value=fill_img.width-1, value=0, key="fx")
-            fy = st.number_input("塗りつぶし開始 縦位置（px）", min_value=0, max_value=fill_img.height-1, value=0, key="fy")
-            fw = st.number_input("塗りつぶし 幅（px）", min_value=1, max_value=fill_img.width-fx, value=50, key="fw")
-            fh = st.number_input("塗りつぶし 高さ（px）", min_value=1, max_value=fill_img.height-fy, value=20, key="fh")
-            color_pick = st.color_picker("塗りつぶし色（スポイトで拾いたい色は一度画像上で確認→カラピで選択）", "#FFFFFF")
-            if st.button("塗りつぶし実行"):
-                draw = ImageDraw.Draw(fill_img)
-                rgb = tuple(int(color_pick.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-                draw.rectangle([fx, fy, fx+fw, fy+fh], fill=rgb)
-                st.image(fill_img, caption="塗りつぶし後プレビュー", use_container_width=True)
-                cropped = fill_img
+        color_pick = "#FFFFFF"
+        st.write("下の画像をクリックすると、その位置の色がカラーピッカーに反映されます。")
+        coords2 = image_coordinates(fill_img, key="fill_select")
+        if coords2 is not None:
+            fx, fy = int(coords2["x"]), int(coords2["y"])
+            rgb = fill_img.getpixel((fx, fy))
+            color_pick = '#%02x%02x%02x' % rgb
+            st.info(f"クリック座標: 横位置={fx}, 縦位置={fy} / 色: {color_pick}")
+        fx = st.number_input("塗りつぶし開始 横位置（px）", min_value=0, max_value=fill_img.width-1, value=0, key="fx")
+        fy = st.number_input("塗りつぶし開始 縦位置（px）", min_value=0, max_value=fill_img.height-1, value=0, key="fy")
+        fw = st.number_input("塗りつぶし 幅（px）", min_value=1, max_value=fill_img.width-fx, value=50, key="fw")
+        fh = st.number_input("塗りつぶし 高さ（px）", min_value=1, max_value=fill_img.height-fy, value=20, key="fh")
+        color_pick = st.color_picker("塗りつぶし色（画像クリックでスポイト）", color_pick)
+        if fill_mode and st.button("塗りつぶし実行"):
+            draw = ImageDraw.Draw(fill_img)
+            rgb = tuple(int(color_pick.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+            draw.rectangle([fx, fy, fx+fw, fy+fh], fill=rgb)
+            st.image(fill_img, caption="塗りつぶし後プレビュー", use_container_width=True)
+            cropped = fill_img
 
         # 【3】PDF出力
         st.subheader("【3】PDF保存")
