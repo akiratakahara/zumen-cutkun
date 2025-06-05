@@ -7,11 +7,11 @@ import numpy as np
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
-from streamlit_image_coordinates import image_coordinates
+import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.2.4"
+APP_VERSION = "v1.2.5"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -147,7 +147,8 @@ if uploaded_pdf and uploaded_template:
             cropped = img.crop((auto_x, auto_y, auto_x + auto_w, auto_y + auto_h))
             grid_img = draw_grid(cropped, grid_step=100)
             st.write("下の画像をクリックすると、範囲指定の左上座標に反映されます。")
-            coords = image_coordinates(grid_img, key="manual_select")
+            # 画像クリックで座標取得
+            coords = streamlit_image_coordinates.image_coordinates(grid_img, key="manual_select")
             if coords is not None:
                 mx, my = int(coords["x"]), int(coords["y"])
                 st.info(f"クリック座標: 横位置={mx}, 縦位置={my}")
