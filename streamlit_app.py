@@ -11,7 +11,7 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.3.1"
+APP_VERSION = "v1.3.2"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -139,38 +139,37 @@ if uploaded_pdf and uploaded_template:
         auto_w, auto_h = auto_x2 - auto_x, auto_y2 - auto_y
 
         st.subheader("【1】帯認識・手動微調整")
-        st.write("下の画像を2回クリックして、コピーしたい範囲（左上→右下）を選択してください。")
+        st.write("下の画像を上下2点クリックして、コピーしたい範囲（上→下）を選択してください。横幅は自動で全幅になります。")
         if 'crop_coords' not in st.session_state:
             st.session_state['crop_coords'] = []
 
         grid_img = draw_grid(img, grid_step=100)
         crop_click = streamlit_image_coordinates(np.array(grid_img), key="manual_crop")
-        def in_bounds(x, y, img):
-            return 0 <= x < img.width and 0 <= y < img.height
+        def in_bounds_y(y, img):
+            return 0 <= y < img.height
 
-        # クリック処理
+        # クリック処理（Y座標のみ記憶）
         if crop_click and len(st.session_state['crop_coords']) < 2:
-            cx, cy = int(crop_click["x"]), int(crop_click["y"])
-            if in_bounds(cx, cy, img):
-                st.session_state['crop_coords'].append((cx, cy))
-                st.info(f"{len(st.session_state['crop_coords'])}点目: 横位置={cx}, 縦位置={cy}")
+            cy = int(crop_click["y"])
+            if in_bounds_y(cy, img):
+                st.session_state['crop_coords'].append(cy)
+                st.info(f"{len(st.session_state['crop_coords'])}点目: 高さ（Y座標）={cy}")
             else:
                 st.warning("画像範囲外がクリックされました。画像内をクリックしてください。")
 
         # プレビューと範囲リセット
         preview_width = st.slider("プレビュー画像の幅(px)", min_value=300, max_value=1200, value=600, step=50)
         if len(st.session_state['crop_coords']) == 2:
-            (x1, y1), (x2, y2) = st.session_state['crop_coords']
-            left, right = min(x1, x2), max(x1, x2)
+            y1, y2 = st.session_state['crop_coords']
             top, bottom = min(y1, y2), max(y1, y2)
             preview_img = img.copy()
             draw = ImageDraw.Draw(preview_img)
-            draw.rectangle([left, top, right, bottom], outline=(255,0,0), width=3)
+            draw.rectangle([0, top, img.width, bottom], outline=(255,0,0), width=3)
             st.image(preview_img, caption="選択範囲プレビュー（赤枠）", width=preview_width)
-            cropped = img.crop((left, top, right, bottom))
+            cropped = img.crop((0, top, img.width, bottom))
             st.success("この範囲がテンプレートにコピーされます。")
         else:
-            st.image(grid_img, caption="2点クリックで範囲選択", width=preview_width)
+            st.image(grid_img, caption="上下2点クリックで範囲選択", width=preview_width)
             cropped = img  # まだ範囲未選択の場合は全体
 
         if st.button("範囲リセット（再選択）"):
