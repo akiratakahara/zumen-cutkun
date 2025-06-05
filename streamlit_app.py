@@ -10,7 +10,7 @@ from reportlab.lib.utils import ImageReader
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.2.2"
+APP_VERSION = "v1.2.3"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -99,6 +99,19 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
     pdf_buffer.seek(0)
     return pdf_buffer
 
+def draw_grid(image: Image.Image, grid_step=100, color=(0, 255, 0), width=1):
+    """画像に目安のグリッド線を描画して返す"""
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    # 縦線
+    for x in range(0, w, grid_step):
+        draw.line([(x, 0), (x, h)], fill=color, width=width)
+    # 横線
+    for y in range(0, h, grid_step):
+        draw.line([(0, y), (w, y)], fill=color, width=width)
+    return img
+
 if uploaded_pdf and uploaded_template:
     with st.spinner("処理中..."):
         # PDF or 画像読込
@@ -115,6 +128,9 @@ if uploaded_pdf and uploaded_template:
         auto_x, auto_y, auto_x2, auto_y2 = selected_area
         auto_w, auto_h = auto_x2 - auto_x, auto_y2 - auto_y
 
+        # プレビューサイズ調整スライダー
+        preview_width = st.slider("プレビュー画像の幅(px)", min_value=300, max_value=1200, value=600, step=50)
+
         st.subheader("【1】帯認識・手動微調整")
         manual_mode = st.checkbox("手動で範囲を指定（自動認識値が初期値です。必要なら微調整してOK）")
         if manual_mode:
@@ -123,9 +139,14 @@ if uploaded_pdf and uploaded_template:
             w = st.number_input("幅", min_value=1, max_value=img.width-x, value=auto_w)
             h = st.number_input("高さ", min_value=1, max_value=img.height-y, value=auto_h)
             cropped = img.crop((x, y, x + w, y + h))
+            # グリッド付きプレビュー
+            grid_img = draw_grid(cropped, grid_step=100)
+            st.image(grid_img, caption="手動選択範囲プレビュー（100pxごとに目安線）", width=preview_width)
+            st.success("この範囲でPDF生成可能！")
         else:
             cropped = img.crop(selected_area)
-        st.image(cropped, caption="図面トリミング範囲プレビュー", use_container_width=True)
+            grid_img = draw_grid(cropped, grid_step=100)
+            st.image(grid_img, caption="自動認識範囲プレビュー（100pxごとに目安線）", width=preview_width)
 
         # 【2】塗りつぶし（色ピッカー＋スポイト仮）
         st.subheader("【2】画像の一部を塗りつぶす（ロゴ・社名隠し等）")
