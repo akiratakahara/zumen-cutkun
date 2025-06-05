@@ -7,7 +7,7 @@ import numpy as np
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
-import streamlit_image_coordinates
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
@@ -148,7 +148,7 @@ if uploaded_pdf and uploaded_template:
             grid_img = draw_grid(cropped, grid_step=100)
             st.write("下の画像をクリックすると、範囲指定の左上座標に反映されます。")
             # 画像クリックで座標取得
-            coords = streamlit_image_coordinates.image_coordinates(np.array(grid_img), key="manual_select")
+            coords = streamlit_image_coordinates(np.array(grid_img), key="manual_select")
             if coords is not None:
                 mx, my = int(coords["x"]), int(coords["y"])
                 st.info(f"クリック座標: 横位置={mx}, 縦位置={my}")
@@ -174,7 +174,7 @@ if uploaded_pdf and uploaded_template:
         fill_img = cropped.copy()
         color_pick = "#FFFFFF"
         st.write("下の画像をクリックすると、その位置の色がカラーピッカーに反映されます。")
-        coords2 = image_coordinates(fill_img, key="fill_select")
+        coords2 = streamlit_image_coordinates(np.array(fill_img), key="fill_select")
         if coords2 is not None:
             fx, fy = int(coords2["x"]), int(coords2["y"])
             rgb = fill_img.getpixel((fx, fy))
