@@ -138,41 +138,22 @@ if uploaded_pdf and uploaded_template:
         auto_x, auto_y, auto_x2, auto_y2 = selected_area
         auto_w, auto_h = auto_x2 - auto_x, auto_y2 - auto_y
 
-        # プレビューサイズ調整スライダー
-        preview_width = st.slider("プレビュー画像の幅(px)", min_value=300, max_value=1200, value=600, step=50)
-
         st.subheader("【1】帯認識・手動微調整")
-        manual_mode = st.checkbox("手動で範囲を指定（クリックで座標取得も可能）")
-        if manual_mode:
-            cropped = img.crop((auto_x, auto_y, auto_x + auto_w, auto_y + auto_h))
-            grid_img = draw_grid(cropped, grid_step=100)
-            st.write("下の画像をクリックすると、範囲指定の左上座標に反映されます。")
-            # 画像クリックで座標取得
-            coords = streamlit_image_coordinates(np.array(grid_img), key="manual_select")
-            if coords is not None:
-                mx, my = int(coords["x"]), int(coords["y"])
-                st.info(f"クリック座標: 横位置={mx}, 縦位置={my}")
-            else:
-                mx, my = auto_x, auto_y
-
-            x = st.number_input("範囲の左上 横位置（px）", min_value=0, max_value=img.width-1, value=mx, key="manual_x")
-            y = st.number_input("範囲の左上 縦位置（px）", min_value=0, max_value=img.height-1, value=my, key="manual_y")
-
-            w_max = img.width - x
-            w_val = min(auto_w, w_max)
-            w = st.number_input("幅（px）", min_value=1, max_value=w_max, value=w_val, key="manual_w")
-
-            h_max = img.height - y
-            h_val = min(auto_h, h_max)
-            h = st.number_input("高さ（px）", min_value=1, max_value=h_max, value=h_val, key="manual_h")
-            cropped = img.crop((x, y, x + w, y + h))
-            grid_img = draw_grid(cropped, grid_step=100)
-            st.image(grid_img, caption="手動選択範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
-            st.success("この範囲でPDF生成可能！")
+        st.write("下の画像をクリックすると、その高さ（Y座標）より下をカットします。")
+        grid_img = draw_grid(img, grid_step=100)
+        coords = streamlit_image_coordinates(np.array(grid_img), key="manual_cut")
+        if coords is not None:
+            cut_y = int(coords["y"])
+            st.info(f"クリック座標: 高さ（Y座標）={cut_y}")
         else:
-            cropped = img.crop(selected_area)
-            grid_img = draw_grid(cropped, grid_step=100)
-            st.image(grid_img, caption="自動認識範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
+            cut_y = st.number_input("カットする高さ（Y座標, px）", min_value=1, max_value=img.height-1, value=auto_y2, key="manual_cut_y")
+
+        # カット処理
+        cropped = img.crop((0, 0, img.width, cut_y))
+        preview_width = st.slider("プレビュー画像の幅(px)", min_value=300, max_value=1200, value=600, step=50)
+        grid_img_cropped = draw_grid(cropped, grid_step=100)
+        st.image(grid_img_cropped, caption="カット後プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
+        st.success("この範囲でPDF生成可能！")
 
         # 【2】塗りつぶし（2点クリック対応・スポイト色取得あり・安全ガード付き）
         st.subheader("【2】画像の一部を塗りつぶす（2回クリックで範囲選択＆2点目クリックで色取得）")
