@@ -1,4 +1,5 @@
-import streamlit_image_coordinates
+from streamlit_image_coordinates import streamlit_image_coordinates
+import numpy as np
 
-# grid_imgはPillow画像なのでNumPy配列に変換
-coords = streamlit_image_coordinates.image_coordinates(np.array(grid_img), key="manual_select")
+# Assuming grid_img is defined earlier in the code
+coords = streamlit_image_coordinates(np.array(grid_img), key="manual_select")
