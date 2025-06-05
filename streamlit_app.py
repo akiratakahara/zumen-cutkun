@@ -1,5 +1,5 @@
 import streamlit as st
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import fitz  # PyMuPDF
 import io
 import cv2
@@ -67,6 +67,37 @@ def remove_red_area(template_img: Image.Image, red_area, fill=(255,255,255,255))
                 img.putpixel((x, y), fill)
     return img
 
+def draw_grid(image: Image.Image, grid_step=100, color=(0, 255, 0), width=2, label_color=(255,0,0)):
+    """画像に目安のグリッド線と大きめの目盛り数字・軸ラベルを描画して返す"""
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+    # フォントサイズを大きめに
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=28)
+    except Exception:
+        font = None  # フォントがなければデフォルト
+
+    # 縦線＋横軸（X軸）ラベル
+    for x in range(0, w, grid_step):
+        draw.line([(x, 0), (x, h)], fill=color, width=width)
+        draw.text((x+4, 8), str(x), fill=label_color, font=font)
+
+    # 横線＋縦軸（Y軸）ラベル
+    for y in range(0, h, grid_step):
+        draw.line([(0, y), (w, y)], fill=color, width=width)
+        draw.text((8, y+4), str(y), fill=label_color, font=font)
+
+    # 軸ラベル
+    if font:
+        draw.text((w//2-40, 8), "横軸(px)", fill=(0,0,255), font=font)
+        draw.text((8, h//2-20), "縦軸(px)", fill=(0,0,255), font=font)
+    else:
+        draw.text((w//2-40, 8), "横軸(px)", fill=(0,0,255))
+        draw.text((8, h//2-20), "縦軸(px)", fill=(0,0,255))
+
+    return img
+
 def generate_pdf(cropped: Image.Image, template: Image.Image):
     red_area = find_red_area(template)
     if red_area is None:
@@ -99,25 +130,6 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
     pdf_buffer.seek(0)
     return pdf_buffer
 
-def draw_grid(image: Image.Image, grid_step=100, color=(0, 255, 0), width=1, label_color=(255,0,0)):
-    """画像に目安のグリッド線と目盛り数字を描画して返す"""
-    img = image.copy()
-    draw = ImageDraw.Draw(img)
-    w, h = img.size
-    font = None  # デフォルトフォント
-
-    # 縦線＋X軸ラベル
-    for x in range(0, w, grid_step):
-        draw.line([(x, 0), (x, h)], fill=color, width=width)
-        draw.text((x+2, 2), str(x), fill=label_color, font=font)
-
-    # 横線＋Y軸ラベル
-    for y in range(0, h, grid_step):
-        draw.line([(0, y), (w, y)], fill=color, width=width)
-        draw.text((2, y+2), str(y), fill=label_color, font=font)
-
-    return img
-
 if uploaded_pdf and uploaded_template:
     with st.spinner("処理中..."):
         # PDF or 画像読込
@@ -140,29 +152,29 @@ if uploaded_pdf and uploaded_template:
         st.subheader("【1】帯認識・手動微調整")
         manual_mode = st.checkbox("手動で範囲を指定（自動認識値が初期値です。必要なら微調整してOK）")
         if manual_mode:
-            x = st.number_input("X座標", min_value=0, max_value=img.width-1, value=auto_x)
-            y = st.number_input("Y座標", min_value=0, max_value=img.height-1, value=auto_y)
-            w = st.number_input("幅", min_value=1, max_value=img.width-x, value=auto_w)
-            h = st.number_input("高さ", min_value=1, max_value=img.height-y, value=auto_h)
+            x = st.number_input("横位置（px）", min_value=0, max_value=img.width-1, value=auto_x)
+            y = st.number_input("縦位置（px）", min_value=0, max_value=img.height-1, value=auto_y)
+            w = st.number_input("幅（px）", min_value=1, max_value=img.width-x, value=auto_w)
+            h = st.number_input("高さ（px）", min_value=1, max_value=img.height-y, value=auto_h)
             cropped = img.crop((x, y, x + w, y + h))
             # グリッド付きプレビュー
             grid_img = draw_grid(cropped, grid_step=100)
-            st.image(grid_img, caption="手動選択範囲プレビュー（100pxごとに目安線）", width=preview_width)
+            st.image(grid_img, caption="手動選択範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
             st.success("この範囲でPDF生成可能！")
         else:
             cropped = img.crop(selected_area)
             grid_img = draw_grid(cropped, grid_step=100)
-            st.image(grid_img, caption="自動認識範囲プレビュー（100pxごとに目安線）", width=preview_width)
+            st.image(grid_img, caption="自動認識範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
 
         # 【2】塗りつぶし（色ピッカー＋スポイト仮）
         st.subheader("【2】画像の一部を塗りつぶす（ロゴ・社名隠し等）")
         fill_mode = st.checkbox("塗りつぶしON")
         fill_img = cropped.copy()
         if fill_mode:
-            fx = st.number_input("塗りつぶし：左上X", min_value=0, max_value=fill_img.width-1, value=0, key="fx")
-            fy = st.number_input("塗りつぶし：左上Y", min_value=0, max_value=fill_img.height-1, value=0, key="fy")
-            fw = st.number_input("塗りつぶし：幅", min_value=1, max_value=fill_img.width-fx, value=50, key="fw")
-            fh = st.number_input("塗りつぶし：高さ", min_value=1, max_value=fill_img.height-fy, value=20, key="fh")
+            fx = st.number_input("塗りつぶし開始 横位置（px）", min_value=0, max_value=fill_img.width-1, value=0, key="fx")
+            fy = st.number_input("塗りつぶし開始 縦位置（px）", min_value=0, max_value=fill_img.height-1, value=0, key="fy")
+            fw = st.number_input("塗りつぶし 幅（px）", min_value=1, max_value=fill_img.width-fx, value=50, key="fw")
+            fh = st.number_input("塗りつぶし 高さ（px）", min_value=1, max_value=fill_img.height-fy, value=20, key="fh")
             color_pick = st.color_picker("塗りつぶし色（スポイトで拾いたい色は一度画像上で確認→カラピで選択）", "#FFFFFF")
             if st.button("塗りつぶし実行"):
                 draw = ImageDraw.Draw(fill_img)
