@@ -157,8 +157,14 @@ if uploaded_pdf and uploaded_template:
 
             x = st.number_input("範囲の左上 横位置（px）", min_value=0, max_value=img.width-1, value=mx, key="manual_x")
             y = st.number_input("範囲の左上 縦位置（px）", min_value=0, max_value=img.height-1, value=my, key="manual_y")
-            w = st.number_input("幅（px）", min_value=1, max_value=img.width-x, value=auto_w, key="manual_w")
-            h = st.number_input("高さ（px）", min_value=1, max_value=img.height-y, value=auto_h, key="manual_h")
+
+            w_max = img.width - x
+            w_val = min(auto_w, w_max)
+            w = st.number_input("幅（px）", min_value=1, max_value=w_max, value=w_val, key="manual_w")
+
+            h_max = img.height - y
+            h_val = min(auto_h, h_max)
+            h = st.number_input("高さ（px）", min_value=1, max_value=h_max, value=h_val, key="manual_h")
             cropped = img.crop((x, y, x + w, y + h))
             grid_img = draw_grid(cropped, grid_step=100)
             st.image(grid_img, caption="手動選択範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
