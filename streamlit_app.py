@@ -10,7 +10,7 @@ from reportlab.lib.utils import ImageReader
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.2.3"
+APP_VERSION = "v1.2.4"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -99,17 +99,23 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
     pdf_buffer.seek(0)
     return pdf_buffer
 
-def draw_grid(image: Image.Image, grid_step=100, color=(0, 255, 0), width=1):
-    """画像に目安のグリッド線を描画して返す"""
+def draw_grid(image: Image.Image, grid_step=100, color=(0, 255, 0), width=1, label_color=(255,0,0)):
+    """画像に目安のグリッド線と目盛り数字を描画して返す"""
     img = image.copy()
     draw = ImageDraw.Draw(img)
     w, h = img.size
-    # 縦線
+    font = None  # デフォルトフォント
+
+    # 縦線＋X軸ラベル
     for x in range(0, w, grid_step):
         draw.line([(x, 0), (x, h)], fill=color, width=width)
-    # 横線
+        draw.text((x+2, 2), str(x), fill=label_color, font=font)
+
+    # 横線＋Y軸ラベル
     for y in range(0, h, grid_step):
         draw.line([(0, y), (w, y)], fill=color, width=width)
+        draw.text((2, y+2), str(y), fill=label_color, font=font)
+
     return img
 
 if uploaded_pdf and uploaded_template:
