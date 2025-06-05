@@ -1,0 +1,1 @@
+coords2 = streamlit_image_coordinates.image_coordinates(np.array(fill_img), key="fill_select")
