@@ -11,6 +11,8 @@ from streamlit_drawable_canvas import st_canvas
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
+APP_VERSION = "v1.1.1"
+st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
 st.markdown("🖼 **テンプレ画像は赤い四角の部分に自動で貼り付けられます（合成時には赤は自動で消去！）**")
@@ -117,25 +119,28 @@ if uploaded_pdf and uploaded_template:
         
         manual_mode = st.checkbox("手動で範囲を指定する（自動認識がおかしい場合）")
         if manual_mode:
-            st.write("画像上でドラッグして範囲指定できます")
-            canvas_result = st_canvas(
-                fill_color="rgba(255,0,0,0.3)",
-                stroke_width=3,
-                background_image=np.array(img),  # ←ここを修正
-                update_streamlit=True,
-                height=img.height,
-                width=img.width,
-                drawing_mode="rect",
-                key="manual_rect"
-            )
-            if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
-                obj = canvas_result.json_data["objects"][0]
-                mx, my = int(obj["left"]), int(obj["top"])
-                mw, mh = int(obj["width"]), int(obj["height"])
-                manual_crop = img.crop((mx, my, mx+mw, my+mh))
-                cropped = manual_crop
-                st.image(cropped, caption="手動選択範囲プレビュー", use_column_width=True)
-                st.success("この範囲でPDF生成可能！")
+            if isinstance(img, Image.Image):
+                st.write("画像上でドラッグして範囲指定できます")
+                canvas_result = st_canvas(
+                    fill_color="rgba(255,0,0,0.3)",
+                    stroke_width=3,
+                    background_image=img,
+                    update_streamlit=True,
+                    height=img.height,
+                    width=img.width,
+                    drawing_mode="rect",
+                    key="manual_rect"
+                )
+                if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
+                    obj = canvas_result.json_data["objects"][0]
+                    mx, my = int(obj["left"]), int(obj["top"])
+                    mw, mh = int(obj["width"]), int(obj["height"])
+                    manual_crop = img.crop((mx, my, mx+mw, my+mh))
+                    cropped = manual_crop
+                    st.image(cropped, caption="手動選択範囲プレビュー", use_column_width=True)
+                    st.success("この範囲でPDF生成可能！")
+            else:
+                st.error("画像の変換に失敗しています。PDFなら一度画像に変換し直してください。")
 
         # 塗りつぶし（スポイト→範囲指定→塗りつぶし）
         st.subheader("任意の範囲を塗りつぶし（例：業者ロゴ消し）")
