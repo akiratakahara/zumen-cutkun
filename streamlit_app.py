@@ -11,7 +11,7 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.2.7"
+APP_VERSION = "v1.2.8"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -174,29 +174,59 @@ if uploaded_pdf and uploaded_template:
             grid_img = draw_grid(cropped, grid_step=100)
             st.image(grid_img, caption="自動認識範囲プレビュー（100pxごとに目安線・軸ラベル付き）", width=preview_width)
 
-        # 【2】塗りつぶし（スポイト対応）
-        st.subheader("【2】画像の一部を塗りつぶす（画像クリックで色取得も可能）")
+        # 【2】塗りつぶし（2点クリック対応・スポイト色取得あり・安全ガード付き）
+        st.subheader("【2】画像の一部を塗りつぶす（2回クリックで範囲選択＆2点目クリックで色取得）")
         fill_mode = st.checkbox("塗りつぶしON")
+
+        # session_stateでクリック座標記憶
+        if 'fill_coords' not in st.session_state:
+            st.session_state['fill_coords'] = []
+
         fill_img = cropped.copy()
-        color_pick = "#FFFFFF"
-        st.write("下の画像をクリックすると、その位置の色がカラーピッカーに反映されます。")
-        coords2 = streamlit_image_coordinates(np.array(fill_img), key="fill_select")
-        if coords2 is not None:
-            fx, fy = int(coords2["x"]), int(coords2["y"])
-            rgb = fill_img.getpixel((fx, fy))
-            color_pick = '#%02x%02x%02x' % rgb
-            st.info(f"クリック座標: 横位置={fx}, 縦位置={fy} / 色: {color_pick}")
-        fx = st.number_input("塗りつぶし開始 横位置（px）", min_value=0, max_value=fill_img.width-1, value=0, key="fx")
-        fy = st.number_input("塗りつぶし開始 縦位置（px）", min_value=0, max_value=fill_img.height-1, value=0, key="fy")
-        fw = st.number_input("塗りつぶし 幅（px）", min_value=1, max_value=fill_img.width-fx, value=50, key="fw")
-        fh = st.number_input("塗りつぶし 高さ（px）", min_value=1, max_value=fill_img.height-fy, value=20, key="fh")
-        color_pick = st.color_picker("塗りつぶし色（画像クリックでスポイト）", color_pick)
-        if fill_mode and st.button("塗りつぶし実行"):
-            draw = ImageDraw.Draw(fill_img)
-            rgb = tuple(int(color_pick.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-            draw.rectangle([fx, fy, fx+fw, fy+fh], fill=rgb)
-            st.image(fill_img, caption="塗りつぶし後プレビュー", use_container_width=True)
-            cropped = fill_img
+        color_pick = st.session_state.get('last_color_pick', "#FFFFFF")
+
+        st.write("下の画像を2回クリックして範囲を選択してください（1点目＝左上、2点目＝右下）。2点目クリック時にその位置の色がスポイトされます。")
+        click = streamlit_image_coordinates(np.array(fill_img), key="fill_select")
+        # 画像範囲内かチェック
+        def in_bounds(x, y, img):
+            return 0 <= x < img.width and 0 <= y < img.height
+
+        # クリック処理
+        if click and fill_mode and len(st.session_state['fill_coords']) < 2:
+            cx, cy = int(click["x"]), int(click["y"])
+            if in_bounds(cx, cy, fill_img):
+                st.session_state['fill_coords'].append((cx, cy))
+                st.info(f"{len(st.session_state['fill_coords'])}点目: 横位置={cx}, 縦位置={cy}")
+                # 2点目クリック時のみスポイト
+                if len(st.session_state['fill_coords']) == 2:
+                    rgb = fill_img.getpixel((cx, cy))
+                    color_pick = '#%02x%02x%02x' % rgb
+                    st.session_state['last_color_pick'] = color_pick
+            else:
+                st.warning("画像範囲外がクリックされました。画像内をクリックしてください。")
+
+        # 塗りつぶしプレビュー
+        if len(st.session_state['fill_coords']) == 2:
+            (x1, y1), (x2, y2) = st.session_state['fill_coords']
+            left, right = min(x1, x2), max(x1, x2)
+            top, bottom = min(y1, y2), max(y1, y2)
+            preview_img = fill_img.copy()
+            draw = ImageDraw.Draw(preview_img)
+            draw.rectangle([left, top, right, bottom], outline=(255,0,0), width=3)
+            color_pick = st.color_picker("塗りつぶし色（2点目クリックでスポイト／ここで変更も可）", color_pick)
+            st.session_state['last_color_pick'] = color_pick  # カラーピッカー変更も反映
+            st.image(preview_img, caption="選択範囲プレビュー（赤枠）", use_container_width=True)
+            if st.button("塗りつぶし実行"):
+                rgb = tuple(int(color_pick.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                draw = ImageDraw.Draw(fill_img)
+                draw.rectangle([left, top, right, bottom], fill=rgb)
+                st.image(fill_img, caption="塗りつぶし後プレビュー", use_container_width=True)
+                cropped = fill_img
+                st.session_state['fill_coords'] = []  # 終了後リセット
+
+        # 範囲リセット
+        if st.button("塗りつぶし範囲リセット"):
+            st.session_state['fill_coords'] = []
 
         # 【3】PDF出力
         st.subheader("【3】PDF保存")
