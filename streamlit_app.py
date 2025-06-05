@@ -148,7 +148,7 @@ if uploaded_pdf and uploaded_template:
             grid_img = draw_grid(cropped, grid_step=100)
             st.write("下の画像をクリックすると、範囲指定の左上座標に反映されます。")
             # 画像クリックで座標取得
-            coords = streamlit_image_coordinates.image_coordinates(grid_img, key="manual_select")
+            coords = streamlit_image_coordinates.image_coordinates(np.array(grid_img), key="manual_select")
             if coords is not None:
                 mx, my = int(coords["x"]), int(coords["y"])
                 st.info(f"クリック座標: 横位置={mx}, 縦位置={my}")
