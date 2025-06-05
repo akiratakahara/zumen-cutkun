@@ -125,7 +125,7 @@ if uploaded_pdf and uploaded_template:
             cropped = img.crop((x, y, x + w, y + h))
         else:
             cropped = img.crop(selected_area)
-        st.image(cropped, caption="図面トリミング範囲プレビュー", use_column_width=True)
+        st.image(cropped, caption="図面トリミング範囲プレビュー", use_container_width=True)
 
         # 【2】塗りつぶし（色ピッカー＋スポイト仮）
         st.subheader("【2】画像の一部を塗りつぶす（ロゴ・社名隠し等）")
@@ -141,7 +141,7 @@ if uploaded_pdf and uploaded_template:
                 draw = ImageDraw.Draw(fill_img)
                 rgb = tuple(int(color_pick.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
                 draw.rectangle([fx, fy, fx+fw, fy+fh], fill=rgb)
-                st.image(fill_img, caption="塗りつぶし後プレビュー", use_column_width=True)
+                st.image(fill_img, caption="塗りつぶし後プレビュー", use_container_width=True)
                 cropped = fill_img
 
         # 【3】PDF出力
