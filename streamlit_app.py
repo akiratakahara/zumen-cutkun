@@ -11,7 +11,7 @@ from streamlit_drawable_canvas import st_canvas
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.1.2"
+APP_VERSION = "v1.1.3"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -124,7 +124,7 @@ if uploaded_pdf and uploaded_template:
                 canvas_result = st_canvas(
                     fill_color="rgba(255,0,0,0.3)",
                     stroke_width=3,
-                    background_image=img,
+                    background_image=np.array(img),  # ← ここを修正
                     update_streamlit=True,
                     height=img.height,
                     width=img.width,
