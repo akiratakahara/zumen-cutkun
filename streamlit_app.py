@@ -11,7 +11,7 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.4.1"
+APP_VERSION = "v1.4.2"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -484,8 +484,8 @@ if uploaded_pdf and uploaded_template:
         if st.session_state.fill_areas:
             current_image = apply_fill_areas(current_image, st.session_state.fill_areas)
         
-        # プレビュー画像更新
-        current_preview = safe_resize_preview(current_image, 800)
+        # プレビュー画像更新（サイズを調整）
+        current_preview = safe_resize_preview(current_image, 600)  # 800→600に変更
         if current_preview is None:
             st.error("プレビュー画像の生成に失敗しました。")
             st.stop()
@@ -504,7 +504,7 @@ if uploaded_pdf and uploaded_template:
         if len(st.session_state.manual_coords) == 2:
             (x1, y1), (x2, y2) = st.session_state.manual_coords
             
-            # 座標変換
+            # 座標変換（元画像の全領域に対応）
             scale_x = st.session_state.original_image.width / current_preview.width
             scale_y = st.session_state.original_image.height / current_preview.height
             
@@ -513,9 +513,16 @@ if uploaded_pdf and uploaded_template:
             real_x2 = int(max(x1, x2) * scale_x)
             real_y2 = int(max(y1, y2) * scale_y)
             
+            # 画像全体の範囲内でクランプ
+            real_x1 = max(0, min(real_x1, st.session_state.original_image.width))
+            real_y1 = max(0, min(real_y1, st.session_state.original_image.height))
+            real_x2 = max(0, min(real_x2, st.session_state.original_image.width))
+            real_y2 = max(0, min(real_y2, st.session_state.original_image.height))
+            
             fill_area = (real_x1, real_y1, real_x2, real_y2)
             
-            if validate_area(fill_area, st.session_state.original_image.width, st.session_state.original_image.height):
+            # 最小サイズのチェックのみ（帯部分も選択可能にするため範囲チェックを緩和）
+            if real_x2 > real_x1 and real_y2 > real_y1 and (real_x2 - real_x1) >= 5 and (real_y2 - real_y1) >= 5:
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.button("✅ 塗りつぶし実行"):
@@ -535,27 +542,60 @@ if uploaded_pdf and uploaded_template:
                 
                 with col3:
                     if st.button("📋 塗りつぶし完了"):
+                        # 塗りつぶしを適用した画像を作成
                         filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
                         st.session_state.processed_image = filled_image
                         st.session_state.processing_step = 'final'
                         st.rerun()
             else:
-                st.error("選択された領域が無効です。")
+                st.error("選択された領域が小さすぎます。より大きな範囲を選択してください。")
                 if st.button("🔄 リセット"):
                     st.session_state.manual_coords = []
                     st.rerun()
         
-        # 現在の状態を表示
-        st.image(current_preview, caption=f"現在の状態（塗りつぶし領域: {len(st.session_state.fill_areas)}個）", use_column_width=True)
+        # 現在の状態を表示（サイズを調整）
+        st.image(current_preview, caption=f"現在の状態（塗りつぶし領域: {len(st.session_state.fill_areas)}個）", width=600)
         
+        # 塗りつぶし領域の管理
         if st.session_state.fill_areas:
-            if st.button("🗑️ 最後の塗りつぶしを削除"):
-                st.session_state.fill_areas.pop()
-                st.rerun()
+            col_mgmt1, col_mgmt2 = st.columns(2)
+            with col_mgmt1:
+                if st.button("🗑️ 最後の塗りつぶしを削除"):
+                    st.session_state.fill_areas.pop()
+                    st.rerun()
             
-            if st.button("🧹 全塗りつぶしをクリア"):
-                st.session_state.fill_areas = []
-                st.rerun()
+            with col_mgmt2:
+                if st.button("🧹 全塗りつぶしをクリア"):
+                    st.session_state.fill_areas = []
+                    st.rerun()
+            
+            # 塗りつぶし領域の一覧表示
+            with st.expander("塗りつぶし領域の詳細"):
+                for i, area in enumerate(st.session_state.fill_areas):
+                    x1, y1, x2, y2, color = area
+                    st.write(f"領域 {i+1}: ({x1}, {y1}) - ({x2}, {y2}), 色: RGB{color}")
+        
+        # 直接PDF生成ボタンを追加
+        if st.session_state.fill_areas:
+            st.subheader("📄 PDF生成")
+            st.info("塗りつぶしを適用した状態でPDFを生成できます。")
+            
+            if st.button("📄 塗りつぶし状態でPDF生成", type="primary"):
+                with st.spinner("PDFを生成中..."):
+                    # 現在の塗りつぶし状態の画像を使用
+                    current_filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
+                    pdf_buffer, message = generate_pdf(current_filled_image, st.session_state.template_image)
+                    
+                    if pdf_buffer:
+                        st.success(message)
+                        st.download_button(
+                            "📥 PDFをダウンロード",
+                            data=pdf_buffer.getvalue(),
+                            file_name="zumen_filled_output.pdf",
+                            mime="application/pdf"
+                        )
+                    else:
+                        st.error(message)
     
     # ステップ5: 最終確認とPDF生成
     elif st.session_state.processing_step == 'final':
