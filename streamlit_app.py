@@ -35,7 +35,9 @@ def init_session_state():
         'template_image': None,
         'eyedropper_mode': False,
         'property_name': '',
-        'property_price': ''
+        'property_price': '',
+        'selected_color': '#ff0000',
+        'confirmed_drawing_area': None
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -454,7 +456,7 @@ if uploaded_pdf and uploaded_template:
             label="自動検出された図面領域"
         )
         
-        st.image(preview_with_area, caption="自動検出結果（緑枠が図面領域）", use_column_width=True)
+        st.image(preview_with_area, caption="自動検出結果（緑枠が図面領域）", use_container_width=True)
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -530,7 +532,7 @@ if uploaded_pdf and uploaded_template:
                     color=(255, 0, 0),
                     label="手動選択領域"
                 )
-                st.image(preview_with_manual, caption="手動選択結果（赤枠が確定される図面領域）", use_column_width=True)
+                st.image(preview_with_manual, caption="手動選択結果（赤枠が確定される図面領域）", use_container_width=True)
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -638,13 +640,18 @@ if uploaded_pdf and uploaded_template:
         else:
             caption = f"図面領域内の塗りつぶし状況（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         
+        # キャプションを表示
+        st.write(caption)
+        
         # 画像をクリック可能な形で表示
-        coordinates = streamlit_image_coordinates(
-            current_preview,
-            caption=caption,
-            use_column_width=True,
-            key=f"image_coords_fill_{len(st.session_state.fill_areas)}"
-        )
+        try:
+            coordinates = streamlit_image_coordinates(
+                current_preview,
+                key=f"image_coords_fill_{len(st.session_state.fill_areas)}"
+            )
+        except Exception as e:
+            st.error(f"画像の表示中にエラーが発生しました: {str(e)}")
+            coordinates = None
         
         # スポイトモードの処理を最優先で分離
         if coordinates and st.session_state.eyedropper_mode:
@@ -793,7 +800,7 @@ if uploaded_pdf and uploaded_template:
             final_preview = safe_resize_preview(st.session_state.processed_image, 600)
             
             if final_preview is not None:
-                st.image(final_preview, caption="処理済み図面（テンプレートに合成される部分）", use_column_width=True)
+                st.image(final_preview, caption="処理済み図面（テンプレートに合成される部分）", use_container_width=True)
                 
                 # PDF生成処理を自動実行
                 with st.spinner("PDFを生成中..."):
