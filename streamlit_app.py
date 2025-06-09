@@ -11,7 +11,7 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.3.2"
+APP_VERSION = "v1.3.3"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -124,117 +124,77 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
 
 if uploaded_pdf and uploaded_template:
     with st.spinner("処理中..."):
-        # PDF or 画像読込
+        # 画像読込
         if uploaded_pdf.name.lower().endswith(".pdf"):
             doc = fitz.open(stream=uploaded_pdf.read(), filetype="pdf")
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            original_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         else:
-            img = Image.open(uploaded_pdf).convert("RGB")
+            original_img = Image.open(uploaded_pdf).convert("RGB")
 
-        # 帯自動認識 → デフォ値設定
-        selected_area = auto_detect_drawing_area(img)
-        auto_x, auto_y, auto_x2, auto_y2 = selected_area
-        auto_w, auto_h = auto_x2 - auto_x, auto_y2 - auto_y
+        # 軽量プレビュー画像生成
+        PREVIEW_WIDTH = 800
+        preview_img = original_img.resize(
+            (PREVIEW_WIDTH, int(original_img.height * PREVIEW_WIDTH / original_img.width)),
+            Image.LANCZOS
+        )
 
-        st.subheader("【1】帯認識・手動微調整")
-        st.write("下の画像を上下2点クリックして、コピーしたい範囲（上→下）を選択してください。横幅は自動で全幅になります。")
-        if 'crop_coords' not in st.session_state:
-            st.session_state['crop_coords'] = []
+        # 操作モード選択
+        mode = st.radio("操作モードを選択", ["帯範囲指定", "塗りつぶし"])
+        if 'coords' not in st.session_state or st.session_state.get('last_mode') != mode:
+            st.session_state['coords'] = []
+            st.session_state['last_mode'] = mode
 
-        grid_img = draw_grid(img, grid_step=100)
-        crop_click = streamlit_image_coordinates(np.array(grid_img), key="manual_crop")
-        def in_bounds_y(y, img):
-            return 0 <= y < img.height
-
-        # クリック処理（Y座標のみ記憶）
-        if crop_click and len(st.session_state['crop_coords']) < 2:
-            cy = int(crop_click["y"])
-            if in_bounds_y(cy, img):
-                st.session_state['crop_coords'].append(cy)
-                st.info(f"{len(st.session_state['crop_coords'])}点目: 高さ（Y座標）={cy}")
-            else:
-                st.warning("画像範囲外がクリックされました。画像内をクリックしてください。")
-
-        # プレビューと範囲リセット
-        preview_width = st.slider("プレビュー画像の幅(px)", min_value=300, max_value=1200, value=600, step=50)
-        if len(st.session_state['crop_coords']) == 2:
-            y1, y2 = st.session_state['crop_coords']
-            top, bottom = min(y1, y2), max(y1, y2)
-            preview_img = img.copy()
-            draw = ImageDraw.Draw(preview_img)
-            draw.rectangle([0, top, img.width, bottom], outline=(255,0,0), width=3)
-            st.image(preview_img, caption="選択範囲プレビュー（赤枠）", width=preview_width)
-            cropped = img.crop((0, top, img.width, bottom))
-            st.success("この範囲がテンプレートにコピーされます。")
-        else:
-            st.image(grid_img, caption="上下2点クリックで範囲選択", width=preview_width)
-            cropped = img  # まだ範囲未選択の場合は全体
-
-        if st.button("範囲リセット（再選択）"):
-            st.session_state['crop_coords'] = []
-
-        # 【2】塗りつぶし（2点クリック対応・スポイト色取得あり・安全ガード付き）
-        st.subheader("【2】画像の一部を塗りつぶす（2回クリックで範囲選択＆2点目クリックで色取得）")
-        fill_mode = st.checkbox("塗りつぶしON")
-
-        # session_stateでクリック座標記憶
-        if 'fill_coords' not in st.session_state:
-            st.session_state['fill_coords'] = []
-
-        fill_img = cropped.copy()
-        color_pick = st.session_state.get('last_color_pick', "#FFFFFF")
-
-        st.write("下の画像を2回クリックして範囲を選択してください（1点目＝左上、2点目＝右下）。2点目クリック時にその位置の色がスポイトされます。")
-        click = streamlit_image_coordinates(np.array(fill_img), key="fill_select")
-        # 画像範囲内かチェック
-        def in_bounds(x, y, img):
-            return 0 <= x < img.width and 0 <= y < img.height
+        # プレビュー画像で2点クリック
+        click = streamlit_image_coordinates(np.array(preview_img), key="preview")
+        st.image(preview_img, caption="プレビュー画像（2点クリックで範囲指定）", width=PREVIEW_WIDTH)
 
         # クリック処理
-        if click and fill_mode and len(st.session_state['fill_coords']) < 2:
-            cx, cy = int(click["x"]), int(click["y"])
-            if in_bounds(cx, cy, fill_img):
-                st.session_state['fill_coords'].append((cx, cy))
-                st.info(f"{len(st.session_state['fill_coords'])}点目: 横位置={cx}, 縦位置={cy}")
-                # 2点目クリック時のみスポイト
-                if len(st.session_state['fill_coords']) == 2:
-                    rgb = fill_img.getpixel((cx, cy))
-                    color_pick = '#%02x%02x%02x' % rgb
-                    st.session_state['last_color_pick'] = color_pick
-            else:
-                st.warning("画像範囲外がクリックされました。画像内をクリックしてください。")
+        if click and len(st.session_state['coords']) < 2:
+            st.session_state['coords'].append((click['x'], click['y']))
+            st.info(f"{len(st.session_state['coords'])}点目: X={click['x']} Y={click['y']}")
 
-        # 塗りつぶしプレビュー
-        if len(st.session_state['fill_coords']) == 2:
-            (x1, y1), (x2, y2) = st.session_state['fill_coords']
+        # 2点揃ったら範囲を赤枠でプレビュー
+        if len(st.session_state['coords']) == 2:
+            (x1, y1), (x2, y2) = st.session_state['coords']
             left, right = min(x1, x2), max(x1, x2)
             top, bottom = min(y1, y2), max(y1, y2)
-            preview_img = fill_img.copy()
-            draw = ImageDraw.Draw(preview_img)
+            preview_draw = preview_img.copy()
+            draw = ImageDraw.Draw(preview_draw)
             draw.rectangle([left, top, right, bottom], outline=(255,0,0), width=3)
-            color_pick = st.color_picker("塗りつぶし色（2点目クリックでスポイト／ここで変更も可）", color_pick)
-            st.session_state['last_color_pick'] = color_pick  # カラーピッカー変更も反映
-            st.image(preview_img, caption="選択範囲プレビュー（赤枠）", use_container_width=True)
-            if st.button("塗りつぶし実行"):
-                rgb = tuple(int(color_pick.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+            st.image(preview_draw, caption="選択範囲プレビュー（赤枠）", width=PREVIEW_WIDTH)
+
+            # 元画像座標に変換
+            real_left = int(left * original_img.width / PREVIEW_WIDTH)
+            real_right = int(right * original_img.width / PREVIEW_WIDTH)
+            real_top = int(top * original_img.height / preview_img.height)
+            real_bottom = int(bottom * original_img.height / preview_img.height)
+
+            if mode == "帯範囲指定":
+                cropped = original_img.crop((0, min(real_top, real_bottom), original_img.width, max(real_top, real_bottom)))
+                st.success("この範囲がテンプレートにコピーされます。")
+            elif mode == "塗りつぶし":
+                color_pick = st.session_state.get('last_color_pick', "#FFFFFF")
+                color_pick = st.color_picker("塗りつぶし色（2点目クリックでスポイト／ここで変更も可）", color_pick)
+                st.session_state['last_color_pick'] = color_pick
+                fill_img = original_img.copy()
                 draw = ImageDraw.Draw(fill_img)
-                draw.rectangle([left, top, right, bottom], fill=rgb)
-                st.image(fill_img, caption="塗りつぶし後プレビュー", use_container_width=True)
+                draw.rectangle([real_left, real_top, real_right, real_bottom], fill=color_pick)
+                st.image(fill_img, caption="塗りつぶし後プレビュー", width=PREVIEW_WIDTH)
                 cropped = fill_img
-                st.session_state['fill_coords'] = []  # 終了後リセット
 
-        # 範囲リセット
-        if st.button("塗りつぶし範囲リセット"):
-            st.session_state['fill_coords'] = []
+            if st.button("範囲リセット"):
+                st.session_state['coords'] = []
 
-        # 【3】PDF出力
-        st.subheader("【3】PDF保存")
-        template = Image.open(uploaded_template).convert("RGBA")
-        result_pdf = generate_pdf(cropped, template)
-        if result_pdf:
-            st.success("PDF出力完了！以下からダウンロードできます：")
-            st.download_button("📄 PDFをダウンロード", data=result_pdf, file_name="zumen_output.pdf", mime="application/pdf")
+            # PDF出力
+            st.subheader("【PDF保存】")
+            template = Image.open(uploaded_template).convert("RGBA")
+            result_pdf = generate_pdf(cropped, template)
+            if result_pdf:
+                st.success("PDF出力完了！以下からダウンロードできます：")
+                st.download_button("📄 PDFをダウンロード", data=result_pdf, file_name="zumen_output.pdf", mime="application/pdf")
+            else:
+                st.error("テンプレ画像に赤枠が見つかりませんでした。")
         else:
-            st.error("テンプレ画像に赤枠が見つかりませんでした。")
+            st.info("2点クリックで範囲を指定してください。")
