@@ -12,7 +12,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.4.5"
+APP_VERSION = "v1.4.6"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -572,11 +572,13 @@ if uploaded_pdf and uploaded_template:
         
         dx1, dy1, dx2, dy2 = st.session_state.confirmed_drawing_area
         st.markdown(f"""
-        **📋 説明**: 確定された図面領域内で塗りつぶしを行います。
+        **📋 塗りつぶし手順**: 確定された図面領域内で塗りつぶしを行います。
         - **図面領域**: ({dx1}, {dy1}) から ({dx2}, {dy2})
-        - **操作方法**: 図面領域内で**左上の点**と**右下の点**を順番にクリック
-        - **1点目**: 塗りつぶし範囲の左上角をクリック
-        - **2点目**: 塗りつぶし範囲の右下角をクリック
+        - **手順**:
+          1. 🎨 **スポイトツール**で色を取得
+          2. 📍 **1点目（左上）**をクリック
+          3. 📍 **2点目（右下）**をクリック  
+          4. ✅ **塗りつぶし実行**をクリック
         - 複数の範囲を塗りつぶしできます
         """)
         
@@ -635,8 +637,10 @@ if uploaded_pdf and uploaded_template:
         # キャプションを動的に設定
         if st.session_state.eyedropper_mode:
             caption = f"🎨 スポイトモード：色を取得したい場所をクリック（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
+        elif len(st.session_state.manual_coords) == 0:
+            caption = f"📍 塗りつぶし範囲の1点目（左上）をクリックしてください（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         elif len(st.session_state.manual_coords) == 1:
-            caption = f"📍 1点目設定済み：2点目（右下角）をクリックしてください（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
+            caption = f"📍 1点目設定済み：2点目（右下）をクリックしてください（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         else:
             caption = f"図面領域内の塗りつぶし状況（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         
@@ -654,10 +658,10 @@ if uploaded_pdf and uploaded_template:
                         st.session_state.selected_color = hex_color
                         # スポイトツールを自動解除して範囲指定モードに移行
                         st.session_state.eyedropper_mode = False
-                        # 色を取得した座標を1点目として自動設定
-                        st.session_state.manual_coords = [(x, y)]
+                        # 座標はリセットして、ユーザーが自由に範囲を選択できるようにする
+                        st.session_state.manual_coords = []
                         st.success(f"🎨 色を取得しました: RGB({r}, {g}, {b}) / {hex_color}")
-                        st.info("✅ 1点目が自動設定されました。続けて2点目（右下角）をクリックしてください。")
+                        st.info("色取得完了！続けて塗りつぶし範囲の1点目（左上）をクリックしてください。")
                         st.rerun()
             elif len(st.session_state.manual_coords) < 2:
                 # 通常の範囲選択モード
@@ -847,9 +851,9 @@ with st.sidebar:
     3. 必要に応じて**手動調整**または**塗りつぶし**
     4. **PDF生成**してダウンロード
     
-    ### ✨ 新機能 v1.4.5
+    ### ✨ 新機能 v1.4.6
     - 🎯 **図面領域確定システム**: 帯の自動認識/手動修正で範囲を確定
-    - 🎨 **スポイトツール強化**: 色取得後に1点目を自動設定し、スムーズに範囲指定へ
+    - 🎨 **スポイトツール**: 色取得後に自由に範囲指定が可能
     - 📝 **名前を付けて保存**: 日付+物件名+価格のファイル名自動生成
     - ⚡ **PDF生成の高速化**: 1クリックで生成からダウンロードまで完了
     - 🎨 **図面領域内塗りつぶし**: 確定された図面領域内でのみ塗りつぶし可能
