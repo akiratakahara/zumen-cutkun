@@ -12,7 +12,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.4.4"
+APP_VERSION = "v1.4.5"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -635,6 +635,8 @@ if uploaded_pdf and uploaded_template:
         # キャプションを動的に設定
         if st.session_state.eyedropper_mode:
             caption = f"🎨 スポイトモード：色を取得したい場所をクリック（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
+        elif len(st.session_state.manual_coords) == 1:
+            caption = f"📍 1点目設定済み：2点目（右下角）をクリックしてください（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         else:
             caption = f"図面領域内の塗りつぶし状況（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         
@@ -652,8 +654,10 @@ if uploaded_pdf and uploaded_template:
                         st.session_state.selected_color = hex_color
                         # スポイトツールを自動解除して範囲指定モードに移行
                         st.session_state.eyedropper_mode = False
+                        # 色を取得した座標を1点目として自動設定
+                        st.session_state.manual_coords = [(x, y)]
                         st.success(f"🎨 色を取得しました: RGB({r}, {g}, {b}) / {hex_color}")
-                        st.info("範囲指定モードに切り替わりました。塗りつぶし範囲を選択してください。")
+                        st.info("✅ 1点目が自動設定されました。続けて2点目（右下角）をクリックしてください。")
                         st.rerun()
             elif len(st.session_state.manual_coords) < 2:
                 # 通常の範囲選択モード
@@ -755,24 +759,26 @@ if uploaded_pdf and uploaded_template:
         # 直接PDF生成ボタンを追加
         if st.session_state.fill_areas:
             st.subheader("📄 PDF生成")
-            st.info("塗りつぶしを適用した状態でPDFを生成できます。")
+            st.info("塗りつぶしを適用した状態でPDFを生成してダウンロードします。")
             
-            if st.button("📄 塗りつぶし状態でPDF生成", type="primary"):
-                with st.spinner("PDFを生成中..."):
-                    # 現在の塗りつぶし状態の画像を使用
-                    current_filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
-                    pdf_buffer, message = generate_pdf(current_filled_image, st.session_state.template_image)
-                    
-                    if pdf_buffer:
-                        st.success(message)
-                        st.download_button(
-                            "📥 PDFをダウンロード",
-                            data=pdf_buffer.getvalue(),
-                            file_name=generate_filename(),
-                            mime="application/pdf"
-                        )
-                    else:
-                        st.error(message)
+            # PDF生成処理を自動実行
+            with st.spinner("PDFを生成中..."):
+                # 現在の塗りつぶし状態の画像を使用
+                current_filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
+                pdf_buffer, message = generate_pdf(current_filled_image, st.session_state.template_image)
+                
+                if pdf_buffer:
+                    st.success("✅ PDF生成完了！下のボタンからダウンロードできます。")
+                    st.download_button(
+                        "📥 塗りつぶし状態のPDFをダウンロード",
+                        data=pdf_buffer.getvalue(),
+                        file_name=generate_filename(),
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True
+                    )
+                else:
+                    st.error(message)
     
     # ステップ5: 最終確認とPDF生成
     elif st.session_state.processing_step == 'final':
@@ -786,31 +792,34 @@ if uploaded_pdf and uploaded_template:
             if final_preview is not None:
                 st.image(final_preview, caption="処理済み図面（テンプレートに合成される部分）", use_column_width=True)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📄 PDF生成", type="primary"):
-                        with st.spinner("PDFを生成中..."):
-                            pdf_buffer, message = generate_pdf(st.session_state.processed_image, st.session_state.template_image)
-                            
-                            if pdf_buffer:
-                                st.success(message)
-                                st.download_button(
-                                    "📥 PDFをダウンロード",
-                                    data=pdf_buffer.getvalue(),
-                                    file_name=generate_filename(),
-                                    mime="application/pdf"
-                                )
-                            else:
-                                st.error(message)
-                
-                with col2:
-                    if st.button("🔙 最初からやり直し"):
-                        # セッションステートをリセット
-                        for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area', 'eyedropper_mode']:
-                            if key in st.session_state:
-                                del st.session_state[key]
-                        st.session_state.processing_step = 'auto_detect'
-                        st.rerun()
+                # PDF生成処理を自動実行
+                with st.spinner("PDFを生成中..."):
+                    pdf_buffer, message = generate_pdf(st.session_state.processed_image, st.session_state.template_image)
+                    
+                    if pdf_buffer:
+                        st.success("✅ PDF生成完了！下のボタンからダウンロードできます。")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                "📥 PDFをダウンロード",
+                                data=pdf_buffer.getvalue(),
+                                file_name=generate_filename(),
+                                mime="application/pdf",
+                                type="primary",
+                                use_container_width=True
+                            )
+                        
+                        with col2:
+                            if st.button("🔙 最初からやり直し", use_container_width=True):
+                                # セッションステートをリセット
+                                for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area', 'eyedropper_mode']:
+                                    if key in st.session_state:
+                                        del st.session_state[key]
+                                st.session_state.processing_step = 'auto_detect'
+                                st.rerun()
+                    else:
+                        st.error(message)
             else:
                 st.error("プレビュー画像の生成に失敗しました。最初からやり直してください。")
                 if st.button("🔙 最初からやり直し"):
@@ -838,16 +847,16 @@ with st.sidebar:
     3. 必要に応じて**手動調整**または**塗りつぶし**
     4. **PDF生成**してダウンロード
     
-    ### ✨ 新機能 v1.4.4
+    ### ✨ 新機能 v1.4.5
     - 🎯 **図面領域確定システム**: 帯の自動認識/手動修正で範囲を確定
-    - 🎨 **スポイトツール**: プレビュー画面をクリックして色を取得（自動で範囲指定モードに切り替え）
+    - 🎨 **スポイトツール強化**: 色取得後に1点目を自動設定し、スムーズに範囲指定へ
     - 📝 **名前を付けて保存**: 日付+物件名+価格のファイル名自動生成
+    - ⚡ **PDF生成の高速化**: 1クリックで生成からダウンロードまで完了
     - 🎨 **図面領域内塗りつぶし**: 確定された図面領域内でのみ塗りつぶし可能
     - 📊 **座標表示詳細化**: 元画像座標と図面内相対座標の両方を表示
     - 🔄 **改善されたフロー**: 図面領域確定 → 塗りつぶし → 出力の明確な流れ
-    - ⚡ 高速読み込み（キャッシュ機能）
-    - 🛡️ エラーハンドリング強化
     - 🖼️ **プレビュー画面最適化**: 塗りつぶしモードで1つのプレビューに統合
+    - 🛡️ エラーハンドリング強化
     """)
     
     if st.session_state.get('processing_step'):
