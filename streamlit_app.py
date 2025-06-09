@@ -8,6 +8,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from streamlit_image_coordinates import streamlit_image_coordinates
+from datetime import datetime
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
@@ -31,7 +32,10 @@ def init_session_state():
         'fill_areas': [],
         'processing_step': 'upload',
         'last_uploaded_file': None,
-        'template_image': None
+        'template_image': None,
+        'eyedropper_mode': False,
+        'property_name': '',
+        'property_price': ''
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -337,9 +341,63 @@ def generate_pdf(cropped: Image.Image, template: Image.Image):
     except Exception as e:
         return None, f"PDF生成エラー: {str(e)}"
 
-# ファイルアップロード
-uploaded_pdf = st.file_uploader("図面PDF または 画像", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=False)
-uploaded_template = st.file_uploader("テンプレ画像（PNG）", type=["png"])
+def generate_filename():
+    """物件情報を基にファイル名を生成"""
+    today = datetime.now().strftime("%y-%m-%d")
+    filename_parts = [today]
+    
+    if st.session_state.property_name:
+        filename_parts.append(st.session_state.property_name)
+    if st.session_state.property_price:
+        filename_parts.append(st.session_state.property_price)
+    
+    if len(filename_parts) == 1:  # 日付のみの場合
+        filename_parts.append("zumen_output")
+    
+    return "_".join(filename_parts) + ".pdf"
+
+# メインUI
+col1, col2 = st.columns(2)
+
+with col1:
+    st.header("📄 図面ファイル")
+    uploaded_pdf = st.file_uploader(
+        "図面PDF または 画像をアップロード",
+        type=["pdf", "png", "jpg", "jpeg"],
+        help="処理したい図面ファイルを選択してください"
+    )
+
+with col2:
+    st.header("🖼️ テンプレート画像")
+    uploaded_template = st.file_uploader(
+        "テンプレート画像（PNG推奨）",
+        type=["png", "jpg", "jpeg"],
+        help="赤い四角が描かれたテンプレート画像をアップロードしてください"
+    )
+
+# 物件情報入力セクション
+st.header("📝 物件情報（ファイル名に使用）")
+col_prop1, col_prop2 = st.columns(2)
+with col_prop1:
+    property_name = st.text_input("物件名", value=st.session_state.property_name, placeholder="例：山田マンション")
+    if property_name != st.session_state.property_name:
+        st.session_state.property_name = property_name
+
+with col_prop2:
+    property_price = st.text_input("価格", value=st.session_state.property_price, placeholder="例：3980万円")
+    if property_price != st.session_state.property_price:
+        st.session_state.property_price = property_price
+
+# ファイル名プレビュー
+if property_name or property_price:
+    today = datetime.now().strftime("%y-%m-%d")
+    filename_parts = [today]
+    if property_name:
+        filename_parts.append(property_name)
+    if property_price:
+        filename_parts.append(property_price)
+    preview_filename = "_".join(filename_parts) + ".pdf"
+    st.info(f"📄 保存ファイル名プレビュー: {preview_filename}")
 
 if uploaded_pdf and uploaded_template:
     # ファイルが変更された場合のみ処理
@@ -369,6 +427,7 @@ if uploaded_pdf and uploaded_template:
             st.session_state.last_uploaded_file = uploaded_pdf.name
             st.session_state.processing_step = 'auto_detect'
             st.session_state.fill_areas = []
+            st.session_state.eyedropper_mode = False
     
     # ステップ1: 自動帯認識
     if st.session_state.processing_step == 'auto_detect':
@@ -522,7 +581,20 @@ if uploaded_pdf and uploaded_template:
         """)
         
         # 塗りつぶし色選択
-        fill_color = st.color_picker("塗りつぶし色", value="#FFFFFF")
+        col_color1, col_color2 = st.columns([1, 1])
+        with col_color1:
+            # スポイトで取得した色があれば使用、なければデフォルト
+            default_color = st.session_state.get('selected_color', "#FFFFFF")
+            fill_color = st.color_picker("塗りつぶし色", value=default_color)
+        with col_color2:
+            eyedropper_active = st.checkbox("🎨 スポイトツール", value=st.session_state.eyedropper_mode)
+            if eyedropper_active != st.session_state.eyedropper_mode:
+                st.session_state.eyedropper_mode = eyedropper_active
+                st.session_state.manual_coords = []  # モード変更時は座標をリセット
+                st.rerun()
+        
+        if st.session_state.eyedropper_mode:
+            st.info("🎨 スポイトモード：画像をクリックして色を取得します")
         
         # 確定された図面領域をクロップした画像で作業
         drawing_area_image = st.session_state.original_image.crop(st.session_state.confirmed_drawing_area)
@@ -560,16 +632,31 @@ if uploaded_pdf and uploaded_template:
             key="fill_select"
         )
         
-        if coordinates and len(st.session_state.manual_coords) < 2:
-            st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
-            if len(st.session_state.manual_coords) == 1:
-                st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
-                st.info("続けて2点目（右下角）をクリックしてください")
-            else:
-                st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+        if coordinates:
+            if st.session_state.eyedropper_mode:
+                # スポイトモード：クリックした位置の色を取得
+                x, y = coordinates['x'], coordinates['y']
+                if 0 <= x < current_preview.width and 0 <= y < current_preview.height:
+                    # プレビュー画像から色を取得
+                    pixel_color = current_preview.getpixel((x, y))
+                    if len(pixel_color) == 3:  # RGB
+                        r, g, b = pixel_color
+                        hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                        # セッション状態を更新してcolor_pickerに反映
+                        st.session_state.selected_color = hex_color
+                        st.success(f"🎨 色を取得しました: RGB({r}, {g}, {b}) / {hex_color}")
+                        st.rerun()
+            elif len(st.session_state.manual_coords) < 2:
+                # 通常の範囲選択モード
+                st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
+                if len(st.session_state.manual_coords) == 1:
+                    st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+                    st.info("続けて2点目（右下角）をクリックしてください")
+                else:
+                    st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
         
-        # 2点が選択された場合
-        if len(st.session_state.manual_coords) == 2:
+        # 2点が選択された場合（通常の範囲選択モードのみ）
+        if not st.session_state.eyedropper_mode and len(st.session_state.manual_coords) == 2:
             (x1, y1), (x2, y2) = st.session_state.manual_coords
             
             # 図面領域内の座標に変換
@@ -673,7 +760,7 @@ if uploaded_pdf and uploaded_template:
                         st.download_button(
                             "📥 PDFをダウンロード",
                             data=pdf_buffer.getvalue(),
-                            file_name="zumen_filled_output.pdf",
+                            file_name=generate_filename(),
                             mime="application/pdf"
                         )
                     else:
@@ -702,7 +789,7 @@ if uploaded_pdf and uploaded_template:
                                 st.download_button(
                                     "📥 PDFをダウンロード",
                                     data=pdf_buffer.getvalue(),
-                                    file_name="zumen_output.pdf",
+                                    file_name=generate_filename(),
                                     mime="application/pdf"
                                 )
                             else:
@@ -711,7 +798,7 @@ if uploaded_pdf and uploaded_template:
                 with col2:
                     if st.button("🔙 最初からやり直し"):
                         # セッションステートをリセット
-                        for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area']:
+                        for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area', 'eyedropper_mode']:
                             if key in st.session_state:
                                 del st.session_state[key]
                         st.session_state.processing_step = 'auto_detect'
@@ -720,7 +807,7 @@ if uploaded_pdf and uploaded_template:
                 st.error("プレビュー画像の生成に失敗しました。最初からやり直してください。")
                 if st.button("🔙 最初からやり直し"):
                     # セッションステートをリセット
-                    for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area']:
+                    for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area', 'eyedropper_mode']:
                         if key in st.session_state:
                             del st.session_state[key]
                     st.session_state.processing_step = 'auto_detect'
@@ -745,13 +832,13 @@ with st.sidebar:
     
     ### ✨ 新機能 v1.4.3
     - 🎯 **図面領域確定システム**: 帯の自動認識/手動修正で範囲を確定
+    - 🎨 **スポイトツール**: プレビュー画面をクリックして色を取得
+    - 📝 **名前を付けて保存**: 日付+物件名+価格のファイル名自動生成
     - 🎨 **図面領域内塗りつぶし**: 確定された図面領域内でのみ塗りつぶし可能
-    - 📝 **詳細な説明文**: わかりやすい操作手順と説明を追加
     - 📊 **座標表示詳細化**: 元画像座標と図面内相対座標の両方を表示
     - 🔄 **改善されたフロー**: 図面領域確定 → 塗りつぶし → 出力の明確な流れ
     - ⚡ 高速読み込み（キャッシュ機能）
     - 🛡️ エラーハンドリング強化
-    - 📄 塗りつぶし状態での直接PDF出力
     """)
     
     if st.session_state.get('processing_step'):
