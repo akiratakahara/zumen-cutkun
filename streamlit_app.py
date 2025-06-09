@@ -11,7 +11,7 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.4.2"
+APP_VERSION = "v1.4.3"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -379,6 +379,13 @@ if uploaded_pdf and uploaded_template:
     # ステップ2: 自動検出結果のレビュー
     if st.session_state.processing_step == 'review_auto':
         st.subheader("🤖 自動検出結果")
+        st.markdown("""
+        **📋 説明**: 自動で図面領域（帯より上の部分）を検出しました。
+        - **緑枠**: 検出された図面領域
+        - この領域が適切であれば「✅この領域でOK」をクリック
+        - 調整が必要な場合は「🔧手動で調整」をクリック
+        - 塗りつぶしが必要な場合は「🎨塗りつぶしモード」をクリック
+        """)
         
         # プレビュー画像に検出領域を描画
         preview_with_area = draw_preview_with_area(
@@ -393,6 +400,8 @@ if uploaded_pdf and uploaded_template:
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("✅ この領域でOK", type="primary"):
+                # 図面領域を確定し、最終ステップへ
+                st.session_state.confirmed_drawing_area = st.session_state.auto_detected_area
                 cropped = safe_crop_image(st.session_state.original_image, st.session_state.auto_detected_area)
                 if cropped is not None:
                     st.session_state.processed_image = cropped
@@ -407,6 +416,8 @@ if uploaded_pdf and uploaded_template:
         
         with col3:
             if st.button("🎨 塗りつぶしモード"):
+                # 図面領域を確定してから塗りつぶしモードへ
+                st.session_state.confirmed_drawing_area = st.session_state.auto_detected_area
                 st.session_state.processing_step = 'fill_mode'
                 st.session_state.manual_coords = []
                 st.rerun()
@@ -414,7 +425,13 @@ if uploaded_pdf and uploaded_template:
     # ステップ3: 手動調整
     elif st.session_state.processing_step == 'manual_adjust':
         st.subheader("🔧 手動で図面領域を調整")
-        st.info("画像上で2点をクリックして範囲を指定してください")
+        st.markdown("""
+        **📋 説明**: 図面領域を手動で調整します。
+        - **操作方法**: 画像上で**左上の点**と**右下の点**を順番にクリック
+        - **1点目**: 図面領域の左上角をクリック
+        - **2点目**: 図面領域の右下角をクリック
+        - 通常は帯（下部の枠）より上の部分を選択します
+        """)
         
         # クリック座標取得
         coordinates = streamlit_image_coordinates(
@@ -424,7 +441,11 @@ if uploaded_pdf and uploaded_template:
         
         if coordinates and len(st.session_state.manual_coords) < 2:
             st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
-            st.success(f"点 {len(st.session_state.manual_coords)}: X={coordinates['x']}, Y={coordinates['y']}")
+            if len(st.session_state.manual_coords) == 1:
+                st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+                st.info("続けて2点目（右下角）をクリックしてください")
+            else:
+                st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
         
         # 2点が選択された場合
         if len(st.session_state.manual_coords) == 2:
@@ -450,11 +471,13 @@ if uploaded_pdf and uploaded_template:
                     color=(255, 0, 0),
                     label="手動選択領域"
                 )
-                st.image(preview_with_manual, caption="手動選択結果（赤枠）", use_column_width=True)
+                st.image(preview_with_manual, caption="手動選択結果（赤枠が確定される図面領域）", use_column_width=True)
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.button("✅ この領域で確定"):
+                    if st.button("✅ この領域で確定", type="primary"):
+                        # 図面領域を確定
+                        st.session_state.confirmed_drawing_area = manual_area
                         cropped = safe_crop_image(st.session_state.original_image, manual_area)
                         if cropped is not None:
                             st.session_state.processed_image = cropped
@@ -462,6 +485,14 @@ if uploaded_pdf and uploaded_template:
                             st.rerun()
                 
                 with col2:
+                    if st.button("🎨 塗りつぶしモード"):
+                        # 図面領域を確定してから塗りつぶしモードへ
+                        st.session_state.confirmed_drawing_area = manual_area
+                        st.session_state.processing_step = 'fill_mode'
+                        st.session_state.manual_coords = []
+                        st.rerun()
+                
+                with col3:
                     if st.button("🔄 やり直し"):
                         st.session_state.manual_coords = []
                         st.rerun()
@@ -474,18 +505,51 @@ if uploaded_pdf and uploaded_template:
     # ステップ4: 塗りつぶしモード
     elif st.session_state.processing_step == 'fill_mode':
         st.subheader("🎨 塗りつぶしモード")
-        st.info("複数の範囲を塗りつぶしできます。2点クリックで範囲を指定してください。")
+        
+        # 確定された図面領域を表示
+        if 'confirmed_drawing_area' not in st.session_state:
+            st.warning("図面領域が確定されていません。")
+            st.stop()
+        
+        dx1, dy1, dx2, dy2 = st.session_state.confirmed_drawing_area
+        st.markdown(f"""
+        **📋 説明**: 確定された図面領域内で塗りつぶしを行います。
+        - **図面領域**: ({dx1}, {dy1}) から ({dx2}, {dy2})
+        - **操作方法**: 図面領域内で**左上の点**と**右下の点**を順番にクリック
+        - **1点目**: 塗りつぶし範囲の左上角をクリック
+        - **2点目**: 塗りつぶし範囲の右下角をクリック
+        - 複数の範囲を塗りつぶしできます
+        """)
         
         # 塗りつぶし色選択
         fill_color = st.color_picker("塗りつぶし色", value="#FFFFFF")
         
-        # 現在の塗りつぶし領域を表示
-        current_image = st.session_state.original_image.copy()
-        if st.session_state.fill_areas:
-            current_image = apply_fill_areas(current_image, st.session_state.fill_areas)
+        # 確定された図面領域をクロップした画像で作業
+        drawing_area_image = st.session_state.original_image.crop(st.session_state.confirmed_drawing_area)
         
-        # プレビュー画像更新（サイズを調整）
-        current_preview = safe_resize_preview(current_image, 600)  # 800→600に変更
+        # 塗りつぶし済み領域を適用
+        if st.session_state.fill_areas:
+            # 図面領域内の相対座標に変換して塗りつぶしを適用
+            relative_fill_areas = []
+            for area in st.session_state.fill_areas:
+                fx1, fy1, fx2, fy2, color = area
+                # 図面領域内の相対座標に変換
+                rel_x1 = fx1 - dx1
+                rel_y1 = fy1 - dy1
+                rel_x2 = fx2 - dx1
+                rel_y2 = fy2 - dy1
+                # 図面領域内にクリップ
+                rel_x1 = max(0, min(rel_x1, drawing_area_image.width))
+                rel_y1 = max(0, min(rel_y1, drawing_area_image.height))
+                rel_x2 = max(0, min(rel_x2, drawing_area_image.width))
+                rel_y2 = max(0, min(rel_y2, drawing_area_image.height))
+                if rel_x2 > rel_x1 and rel_y2 > rel_y1:
+                    relative_fill_areas.append((rel_x1, rel_y1, rel_x2, rel_y2, color))
+            
+            drawing_area_image = apply_fill_areas(drawing_area_image, relative_fill_areas)
+        
+        # プレビュー画像生成
+        current_preview = safe_resize_preview(drawing_area_image, 600)
         if current_preview is None:
             st.error("プレビュー画像の生成に失敗しました。")
             st.stop()
@@ -498,31 +562,39 @@ if uploaded_pdf and uploaded_template:
         
         if coordinates and len(st.session_state.manual_coords) < 2:
             st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
-            st.success(f"点 {len(st.session_state.manual_coords)}: X={coordinates['x']}, Y={coordinates['y']}")
+            if len(st.session_state.manual_coords) == 1:
+                st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+                st.info("続けて2点目（右下角）をクリックしてください")
+            else:
+                st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
         
         # 2点が選択された場合
         if len(st.session_state.manual_coords) == 2:
             (x1, y1), (x2, y2) = st.session_state.manual_coords
             
-            # 座標変換（元画像の全領域に対応）
-            scale_x = st.session_state.original_image.width / current_preview.width
-            scale_y = st.session_state.original_image.height / current_preview.height
+            # 図面領域内の座標に変換
+            scale_x = drawing_area_image.width / current_preview.width
+            scale_y = drawing_area_image.height / current_preview.height
             
-            real_x1 = int(min(x1, x2) * scale_x)
-            real_y1 = int(min(y1, y2) * scale_y)
-            real_x2 = int(max(x1, x2) * scale_x)
-            real_y2 = int(max(y1, y2) * scale_y)
+            rel_x1 = int(min(x1, x2) * scale_x)
+            rel_y1 = int(min(y1, y2) * scale_y)
+            rel_x2 = int(max(x1, x2) * scale_x)
+            rel_y2 = int(max(y1, y2) * scale_y)
             
-            # 画像全体の範囲内でクランプ
-            real_x1 = max(0, min(real_x1, st.session_state.original_image.width))
-            real_y1 = max(0, min(real_y1, st.session_state.original_image.height))
-            real_x2 = max(0, min(real_x2, st.session_state.original_image.width))
-            real_y2 = max(0, min(real_y2, st.session_state.original_image.height))
+            # 図面領域内でクランプ
+            rel_x1 = max(0, min(rel_x1, drawing_area_image.width))
+            rel_y1 = max(0, min(rel_y1, drawing_area_image.height))
+            rel_x2 = max(0, min(rel_x2, drawing_area_image.width))
+            rel_y2 = max(0, min(rel_y2, drawing_area_image.height))
             
-            fill_area = (real_x1, real_y1, real_x2, real_y2)
+            # 元画像での絶対座標に変換
+            abs_x1 = rel_x1 + dx1
+            abs_y1 = rel_y1 + dy1
+            abs_x2 = rel_x2 + dx1
+            abs_y2 = rel_y2 + dy1
             
-            # 最小サイズのチェックのみ（帯部分も選択可能にするため範囲チェックを緩和）
-            if real_x2 > real_x1 and real_y2 > real_y1 and (real_x2 - real_x1) >= 5 and (real_y2 - real_y1) >= 5:
+            # 最小サイズのチェック
+            if rel_x2 > rel_x1 and rel_y2 > rel_y1 and (rel_x2 - rel_x1) >= 5 and (rel_y2 - rel_y1) >= 5:
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.button("✅ 塗りつぶし実行"):
@@ -530,7 +602,8 @@ if uploaded_pdf and uploaded_template:
                         hex_color = fill_color.lstrip('#')
                         rgb_color = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
                         
-                        st.session_state.fill_areas.append((real_x1, real_y1, real_x2, real_y2, rgb_color))
+                        # 絶対座標で保存
+                        st.session_state.fill_areas.append((abs_x1, abs_y1, abs_x2, abs_y2, rgb_color))
                         st.session_state.manual_coords = []
                         st.success("塗りつぶしを追加しました！")
                         st.rerun()
@@ -542,9 +615,10 @@ if uploaded_pdf and uploaded_template:
                 
                 with col3:
                     if st.button("📋 塗りつぶし完了"):
-                        # 塗りつぶしを適用した画像を作成
+                        # 図面領域をクロップして塗りつぶしを適用
                         filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
-                        st.session_state.processed_image = filled_image
+                        final_cropped = filled_image.crop(st.session_state.confirmed_drawing_area)
+                        st.session_state.processed_image = final_cropped
                         st.session_state.processing_step = 'final'
                         st.rerun()
             else:
@@ -553,8 +627,8 @@ if uploaded_pdf and uploaded_template:
                     st.session_state.manual_coords = []
                     st.rerun()
         
-        # 現在の状態を表示（サイズを調整）
-        st.image(current_preview, caption=f"現在の状態（塗りつぶし領域: {len(st.session_state.fill_areas)}個）", width=600)
+        # 現在の状態を表示（図面領域のみ）
+        st.image(current_preview, caption=f"図面領域内の塗りつぶし状況（塗りつぶし領域: {len(st.session_state.fill_areas)}個）", width=600)
         
         # 塗りつぶし領域の管理
         if st.session_state.fill_areas:
@@ -573,7 +647,15 @@ if uploaded_pdf and uploaded_template:
             with st.expander("塗りつぶし領域の詳細"):
                 for i, area in enumerate(st.session_state.fill_areas):
                     x1, y1, x2, y2, color = area
-                    st.write(f"領域 {i+1}: ({x1}, {y1}) - ({x2}, {y2}), 色: RGB{color}")
+                    # 図面領域内の相対座標も表示
+                    rel_x1 = x1 - dx1
+                    rel_y1 = y1 - dy1
+                    rel_x2 = x2 - dx1
+                    rel_y2 = y2 - dy1
+                    st.write(f"領域 {i+1}:")
+                    st.write(f"  - 元画像座標: ({x1}, {y1}) - ({x2}, {y2})")
+                    st.write(f"  - 図面内座標: ({rel_x1}, {rel_y1}) - ({rel_x2}, {rel_y2})")
+                    st.write(f"  - 色: RGB{color}")
         
         # 直接PDF生成ボタンを追加
         if st.session_state.fill_areas:
@@ -629,7 +711,7 @@ if uploaded_pdf and uploaded_template:
                 with col2:
                     if st.button("🔙 最初からやり直し"):
                         # セッションステートをリセット
-                        for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area']:
+                        for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area']:
                             if key in st.session_state:
                                 del st.session_state[key]
                         st.session_state.processing_step = 'auto_detect'
@@ -638,7 +720,7 @@ if uploaded_pdf and uploaded_template:
                 st.error("プレビュー画像の生成に失敗しました。最初からやり直してください。")
                 if st.button("🔙 最初からやり直し"):
                     # セッションステートをリセット
-                    for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area']:
+                    for key in ['processed_image', 'processing_step', 'manual_coords', 'fill_areas', 'auto_detected_area', 'confirmed_drawing_area']:
                         if key in st.session_state:
                             del st.session_state[key]
                     st.session_state.processing_step = 'auto_detect'
@@ -661,13 +743,15 @@ with st.sidebar:
     3. 必要に応じて**手動調整**または**塗りつぶし**
     4. **PDF生成**してダウンロード
     
-    ### ✨ 新機能 v1.4.1
-    - 🤖 改良された自動帯認識
-    - 🎨 複数範囲塗りつぶし対応
+    ### ✨ 新機能 v1.4.3
+    - 🎯 **図面領域確定システム**: 帯の自動認識/手動修正で範囲を確定
+    - 🎨 **図面領域内塗りつぶし**: 確定された図面領域内でのみ塗りつぶし可能
+    - 📝 **詳細な説明文**: わかりやすい操作手順と説明を追加
+    - 📊 **座標表示詳細化**: 元画像座標と図面内相対座標の両方を表示
+    - 🔄 **改善されたフロー**: 図面領域確定 → 塗りつぶし → 出力の明確な流れ
     - ⚡ 高速読み込み（キャッシュ機能）
-    - 🖼️ プレビュー画面最適化
-    - 📱 直感的なUI
     - 🛡️ エラーハンドリング強化
+    - 📄 塗りつぶし状態での直接PDF出力
     """)
     
     if st.session_state.get('processing_step'):
@@ -682,4 +766,6 @@ with st.sidebar:
             st.write(f"処理済み画像サイズ: {st.session_state.processed_image.width} x {st.session_state.processed_image.height}")
         st.write(f"塗りつぶし領域数: {len(st.session_state.fill_areas)}")
         if st.session_state.auto_detected_area:
-            st.write(f"自動検出領域: {st.session_state.auto_detected_area}") 
+            st.write(f"自動検出領域: {st.session_state.auto_detected_area}")
+        if 'confirmed_drawing_area' in st.session_state:
+            st.write(f"確定図面領域: {st.session_state.confirmed_drawing_area}")
