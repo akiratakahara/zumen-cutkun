@@ -628,12 +628,6 @@ if uploaded_pdf and uploaded_template:
             st.error("プレビュー画像の生成に失敗しました。")
             st.stop()
         
-        # 現在の状態を表示（図面領域のみ）とクリック座標取得を統合
-        coordinates = streamlit_image_coordinates(
-            np.array(current_preview),
-            key="fill_select"
-        )
-        
         # キャプションを動的に設定
         if st.session_state.eyedropper_mode:
             caption = f"🎨 スポイトモード：色を取得したい場所をクリック（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
@@ -644,33 +638,40 @@ if uploaded_pdf and uploaded_template:
         else:
             caption = f"図面領域内の塗りつぶし状況（塗りつぶし領域: {len(st.session_state.fill_areas)}個）"
         
-        if coordinates:
-            if st.session_state.eyedropper_mode:
-                # スポイトモード：クリックした位置の色を取得
-                x, y = coordinates['x'], coordinates['y']
-                if 0 <= x < current_preview.width and 0 <= y < current_preview.height:
-                    # プレビュー画像から色を取得
-                    pixel_color = current_preview.getpixel((x, y))
-                    if len(pixel_color) == 3:  # RGB
-                        r, g, b = pixel_color
-                        hex_color = f"#{r:02x}{g:02x}{b:02x}"
-                        # セッション状態を更新してcolor_pickerに反映
-                        st.session_state.selected_color = hex_color
-                        # スポイトツールを自動解除して範囲指定モードに移行
-                        st.session_state.eyedropper_mode = False
-                        # 座標はリセットして、ユーザーが自由に範囲を選択できるようにする
-                        st.session_state.manual_coords = []
-                        st.success(f"🎨 色を取得しました: RGB({r}, {g}, {b}) / {hex_color}")
-                        st.info("色取得完了！続けて塗りつぶし範囲の1点目（左上）をクリックしてください。")
-                        st.rerun()
-            elif len(st.session_state.manual_coords) < 2:
-                # 通常の範囲選択モード
-                st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
-                if len(st.session_state.manual_coords) == 1:
-                    st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
-                    st.info("続けて2点目（右下角）をクリックしてください")
-                else:
-                    st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+        # 画像をクリック可能な形で表示
+        coordinates = streamlit_image_coordinates(
+            current_preview,
+            caption=caption,
+            use_column_width=True,
+            key=f"image_coords_fill_{len(st.session_state.fill_areas)}"
+        )
+        
+        # スポイトモードの処理を最優先で分離
+        if coordinates and st.session_state.eyedropper_mode:
+            # スポイトモード：クリックした位置の色を取得のみ
+            x, y = coordinates['x'], coordinates['y']
+            if 0 <= x < current_preview.width and 0 <= y < current_preview.height:
+                # プレビュー画像から色を取得
+                pixel_color = current_preview.getpixel((x, y))
+                if len(pixel_color) == 3:  # RGB
+                    r, g, b = pixel_color
+                    hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                    # セッション状態を更新してcolor_pickerに反映
+                    st.session_state.selected_color = hex_color
+                    # スポイトツールを自動解除
+                    st.session_state.eyedropper_mode = False
+                    st.success(f"🎨 色を取得しました: RGB({r}, {g}, {b}) / {hex_color}")
+                    st.info("色取得完了！続けて塗りつぶし範囲の1点目（左上）をクリックしてください。")
+                    st.rerun()
+        
+        # 通常の範囲選択モード（スポイトモードでない場合のみ）
+        elif coordinates and not st.session_state.eyedropper_mode and len(st.session_state.manual_coords) < 2:
+            st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
+            if len(st.session_state.manual_coords) == 1:
+                st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+                st.info("続けて2点目（右下角）をクリックしてください")
+            else:
+                st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
         
         # 2点が選択された場合（通常の範囲選択モードのみ）
         if not st.session_state.eyedropper_mode and len(st.session_state.manual_coords) == 2:
@@ -730,8 +731,6 @@ if uploaded_pdf and uploaded_template:
                 if st.button("🔄 リセット"):
                     st.session_state.manual_coords = []
                     st.rerun()
-        
-
         
         # 塗りつぶし領域の管理
         if st.session_state.fill_areas:
