@@ -12,7 +12,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.5.2"
+APP_VERSION = "v1.5.3"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -784,8 +784,9 @@ if uploaded_pdf and uploaded_template:
             
             # PDF生成処理を自動実行
             with st.spinner("PDFを生成中..."):
-                # 現在の塗りつぶし状態の画像を使用
-                current_filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
+                # 図面領域に塗りつぶしを適用してからクロップ
+                filled_image = apply_fill_areas(st.session_state.original_image, st.session_state.fill_areas)
+                current_filled_image = filled_image.crop(st.session_state.confirmed_drawing_area)
                 pdf_buffer, message = generate_pdf(current_filled_image, st.session_state.template_image)
                 
                 if pdf_buffer:
