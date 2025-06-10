@@ -12,7 +12,7 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.4.9"
+APP_VERSION = "v1.5.2"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
 
 st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
@@ -36,7 +36,7 @@ def init_session_state():
         'eyedropper_mode': False,
         'property_name': '',
         'property_price': '',
-        'selected_color': '#ff0000',
+        'selected_color': '#FFFFFF',
         'confirmed_drawing_area': None
     }
     for key, value in defaults.items():
@@ -584,21 +584,32 @@ if uploaded_pdf and uploaded_template:
         - 複数の範囲を塗りつぶしできます
         """)
         
-        # 塗りつぶし色選択
-        col_color1, col_color2 = st.columns([1, 1])
-        with col_color1:
-            # スポイトで取得した色があれば使用、なければデフォルト
-            default_color = st.session_state.get('selected_color', "#FFFFFF")
-            fill_color = st.color_picker("塗りつぶし色", value=default_color)
-        with col_color2:
-            eyedropper_active = st.checkbox("🎨 スポイトツール", value=st.session_state.eyedropper_mode)
-            if eyedropper_active != st.session_state.eyedropper_mode:
-                st.session_state.eyedropper_mode = eyedropper_active
-                st.session_state.manual_coords = []  # モード変更時は座標をリセット
-                st.rerun()
+        # 操作モード選択（排他的）
+        st.subheader("🔧 操作モード選択")
+        mode = st.radio(
+            "操作を選択してください：",
+            ["🎨 スポイトツール（色取得）", "📍 範囲選択（塗りつぶし範囲指定）"],
+            index=1 if not st.session_state.eyedropper_mode else 0,
+            horizontal=True
+        )
         
+        # モード変更時の処理
+        new_eyedropper_mode = (mode == "🎨 スポイトツール（色取得）")
+        if new_eyedropper_mode != st.session_state.eyedropper_mode:
+            st.session_state.eyedropper_mode = new_eyedropper_mode
+            st.session_state.manual_coords = []  # モード変更時は座標をリセット
+            st.rerun()
+        
+        # 現在のモードに応じた説明表示
         if st.session_state.eyedropper_mode:
-            st.info("🎨 スポイトモード：画像をクリックして色を取得します")
+            st.info("🎨 **スポイトモード**: 画像をクリックして色を取得します（座標は記録されません）")
+        else:
+            st.info("📍 **範囲選択モード**: 画像をクリックして塗りつぶし範囲を指定します（1点目→2点目の順）")
+        
+        # 塗りつぶし色選択
+        # スポイトで取得した色があれば使用、なければデフォルト
+        default_color = st.session_state.get('selected_color', "#FFFFFF")
+        fill_color = st.color_picker("塗りつぶし色", value=default_color)
         
         # 確定された図面領域をクロップした画像で作業
         drawing_area_image = st.session_state.original_image.crop(st.session_state.confirmed_drawing_area)
@@ -653,10 +664,10 @@ if uploaded_pdf and uploaded_template:
             st.error(f"画像の表示中にエラーが発生しました: {str(e)}")
             coordinates = None
         
-        # 座標クリックイベントの処理
+        # 座標クリックイベントの処理（モード別に完全分離）
         if coordinates:
             if st.session_state.eyedropper_mode:
-                # スポイトモード：色取得のみ（座標は保存しない）
+                # 🎨 スポイトモード：色取得のみ（座標は一切保存しない）
                 x, y = coordinates['x'], coordinates['y']
                 if 0 <= x < current_preview.width and 0 <= y < current_preview.height:
                     # プレビュー画像から色を取得
@@ -666,19 +677,19 @@ if uploaded_pdf and uploaded_template:
                         hex_color = f"#{r:02x}{g:02x}{b:02x}"
                         # セッション状態を更新してcolor_pickerに反映
                         st.session_state.selected_color = hex_color
-                        # スポイトツールを自動解除
-                        st.session_state.eyedropper_mode = False
                         st.success(f"🎨 色を取得しました: RGB({r}, {g}, {b}) / {hex_color}")
-                        st.info("色取得完了！続けて塗りつぶし範囲の1点目（左上）をクリックしてください。")
+                        st.info("💡 色が更新されました！範囲選択モードに切り替えて塗りつぶし範囲を指定してください。")
                         st.rerun()
-            elif len(st.session_state.manual_coords) < 2:
-                # 通常の範囲選択モード：座標を保存
-                st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
-                if len(st.session_state.manual_coords) == 1:
-                    st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
-                    st.info("続けて2点目（右下角）をクリックしてください")
-                else:
-                    st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+            else:
+                # 📍 範囲選択モード：座標のみ保存（色取得は行わない）
+                if len(st.session_state.manual_coords) < 2:
+                    st.session_state.manual_coords.append((coordinates['x'], coordinates['y']))
+                    if len(st.session_state.manual_coords) == 1:
+                        st.success(f"✅ 1点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+                        st.info("続けて2点目（右下角）をクリックしてください")
+                    else:
+                        st.success(f"✅ 2点目を選択しました: X={coordinates['x']}, Y={coordinates['y']}")
+                        st.info("範囲が確定しました！塗りつぶし実行ボタンをクリックしてください。")
         
         # 2点が選択された場合（通常の範囲選択モードのみ）
         if not st.session_state.eyedropper_mode and len(st.session_state.manual_coords) == 2:
