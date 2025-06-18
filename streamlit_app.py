@@ -69,6 +69,7 @@ def init_learning_data():
 def save_learning_data(band_position, image_features):
     """学習データの保存"""
     try:
+        LEARNING_DATA_DIR.mkdir(exist_ok=True)  # Ensure directory exists
         if LEARNING_DATA_FILE.exists():
             with open(LEARNING_DATA_FILE, 'r') as f:
                 data = json.load(f)
@@ -198,6 +199,7 @@ def auto_detect_drawing_area(image: Image.Image):
         return (0, 0, w, int(h * 0.8))
 
 init_session_state()
+init_learning_data()
 
 @st.cache_data
 def load_and_process_image(file_data, file_name):
