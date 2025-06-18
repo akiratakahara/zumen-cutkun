@@ -10,6 +10,9 @@ from reportlab.lib.utils import ImageReader
 from streamlit_image_coordinates import streamlit_image_coordinates
 from datetime import datetime
 import warnings
+import json
+import os
+from pathlib import Path
 warnings.filterwarnings('ignore')
 
 # Import with fallback for streamlit-image-coordinates
@@ -22,12 +25,8 @@ except ImportError:
 
 st.set_page_config(layout="wide")
 st.title("図面帯カットくん｜不動産営業の即戦力")
-APP_VERSION = "v1.5.4"
+APP_VERSION = "v1.5.5"
 st.markdown(f"#### 🏷️ バージョン: {APP_VERSION}")
-
-st.markdown("📎 **PDFや画像をアップして、テンプレに図面を合成 → 高画質PDF出力できます！**")
-st.markdown("🖼 **テンプレ画像は赤い四角の部分に自動で貼り付けられます（赤は合成後自動で消去）**")
-st.markdown("⚠️ **テンプレ画像は300DPI以上推奨！印刷が綺麗になります。**")
 
 # セッションステートの初期化
 def init_session_state():
@@ -52,6 +51,151 @@ def init_session_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+# 学習データの保存先
+LEARNING_DATA_DIR = Path("learning_data")
+LEARNING_DATA_FILE = LEARNING_DATA_DIR / "band_detection_data.json"
+
+def init_learning_data():
+    """学習データの初期化"""
+    LEARNING_DATA_DIR.mkdir(exist_ok=True)
+    if not LEARNING_DATA_FILE.exists():
+        with open(LEARNING_DATA_FILE, 'w') as f:
+            json.dump({
+                'band_positions': [],
+                'image_features': []
+            }, f)
+
+def save_learning_data(band_position, image_features):
+    """学習データの保存"""
+    try:
+        if LEARNING_DATA_FILE.exists():
+            with open(LEARNING_DATA_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {'band_positions': [], 'image_features': []}
+        
+        # 新しいデータを追加
+        data['band_positions'].append(band_position)
+        data['image_features'].append(image_features)
+        
+        # データを保存
+        with open(LEARNING_DATA_FILE, 'w') as f:
+            json.dump(data, f)
+        
+        return True
+    except Exception as e:
+        st.error(f"学習データの保存に失敗しました: {str(e)}")
+        return False
+
+def extract_image_features(image: Image.Image):
+    """画像から特徴量を抽出"""
+    try:
+        # グレースケール変換
+        gray = np.array(image.convert('L'))
+        
+        # エッジ検出
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # 特徴量の計算
+        features = {
+            'width': image.width,
+            'height': image.height,
+            'edge_density': np.mean(edges) / 255.0,
+            'brightness': np.mean(gray) / 255.0
+        }
+        
+        return features
+    except Exception as e:
+        st.error(f"特徴量の抽出に失敗しました: {str(e)}")
+        return None
+
+def predict_band_position(image: Image.Image):
+    """学習データを基に帯位置を予測"""
+    try:
+        if not LEARNING_DATA_FILE.exists():
+            return None
+        
+        # 学習データの読み込み
+        with open(LEARNING_DATA_FILE, 'r') as f:
+            data = json.load(f)
+        
+        if not data['band_positions']:
+            return None
+        
+        # 現在の画像の特徴量を抽出
+        current_features = extract_image_features(image)
+        if not current_features:
+            return None
+        
+        # 最も類似した過去のデータを探す
+        best_match = None
+        min_diff = float('inf')
+        
+        for i, features in enumerate(data['image_features']):
+            # 特徴量の差分を計算
+            diff = abs(features['width'] - current_features['width']) + \
+                   abs(features['height'] - current_features['height']) + \
+                   abs(features['edge_density'] - current_features['edge_density']) + \
+                   abs(features['brightness'] - current_features['brightness'])
+            
+            if diff < min_diff:
+                min_diff = diff
+                best_match = data['band_positions'][i]
+        
+        return best_match
+    except Exception as e:
+        st.error(f"帯位置の予測に失敗しました: {str(e)}")
+        return None
+
+def auto_detect_drawing_area(image: Image.Image):
+    """図面領域を自動検出（学習機能付き）"""
+    try:
+        # 学習データからの予測を試みる
+        predicted_position = predict_band_position(image)
+        
+        if predicted_position:
+            # 予測位置を使用
+            x, y, w, h = predicted_position
+            detected_area = (0, 0, image.width, y)
+            return detected_area
+        
+        # 予測がない場合は従来の方法で検出
+        np_img = np.array(image.convert("L"))
+        edges = cv2.Canny(np_img, 50, 150)
+        kernel = np.ones((3,3), np.uint8)
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        h, w = np_img.shape
+        
+        band_candidates = []
+        for cnt in contours:
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            area = bw * bh
+            
+            if (y > h * 0.6 and 
+                bw > w * 0.7 and 
+                bh > h * 0.05 and 
+                area > 1000):
+                band_candidates.append((x, y, x + bw, y + bh, area))
+        
+        if band_candidates:
+            band_box = max(band_candidates, key=lambda x: x[4])
+            bx1, by1, bx2, by2, _ = band_box
+            detected_area = (0, 0, w, by1)
+        else:
+            detected_area = (0, 0, w, int(h * 0.8))
+        
+        x1, y1, x2, y2 = detected_area
+        if x2 <= x1 or y2 <= y1:
+            return (0, 0, w, int(h * 0.8))
+        
+        return detected_area
+    except Exception as e:
+        st.error(f"自動検出中にエラーが発生しました: {str(e)}")
+        h, w = image.height, image.width
+        return (0, 0, w, int(h * 0.8))
 
 init_session_state()
 
@@ -82,57 +226,6 @@ def load_and_process_image(file_data, file_name):
     except Exception as e:
         st.error(f"画像の読み込みに失敗しました: {str(e)}")
         return None, None
-
-def auto_detect_drawing_area(image: Image.Image):
-    """図面領域を自動検出（改良版）"""
-    try:
-        np_img = np.array(image.convert("L"))
-        
-        # エッジ検出のパラメータを調整
-        edges = cv2.Canny(np_img, 50, 150)
-        
-        # ノイズ除去
-        kernel = np.ones((3,3), np.uint8)
-        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
-        
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        h, w = np_img.shape
-        
-        # 帯領域候補を検出
-        band_candidates = []
-        for cnt in contours:
-            x, y, bw, bh = cv2.boundingRect(cnt)
-            area = bw * bh
-            
-            # 条件を調整：下部60%以下、幅が70%以上、高さが画像の5%以上
-            if (y > h * 0.6 and 
-                bw > w * 0.7 and 
-                bh > h * 0.05 and 
-                area > 1000):
-                band_candidates.append((x, y, x + bw, y + bh, area))
-        
-        if band_candidates:
-            # 最も大きな帯を選択
-            band_box = max(band_candidates, key=lambda x: x[4])
-            bx1, by1, bx2, by2, _ = band_box
-            # 帯より上の部分を図面領域とする
-            detected_area = (0, 0, w, by1)
-        else:
-            # 帯が見つからない場合は画像全体の80%を図面領域とする
-            detected_area = (0, 0, w, int(h * 0.8))
-        
-        # 検出された領域の妥当性をチェック
-        x1, y1, x2, y2 = detected_area
-        if x2 <= x1 or y2 <= y1:
-            # 無効な領域の場合、画像全体の80%にフォールバック
-            return (0, 0, w, int(h * 0.8))
-        
-        return detected_area
-    except Exception as e:
-        st.error(f"自動検出中にエラーが発生しました: {str(e)}")
-        # エラー時は画像全体の80%を返す
-        h, w = image.height, image.width
-        return (0, 0, w, int(h * 0.8))
 
 def validate_area(area, image_width, image_height):
     """選択領域の妥当性をチェック"""
@@ -559,6 +652,28 @@ if uploaded_pdf and uploaded_template:
                 if st.button("🔄 リセット"):
                     st.session_state.manual_coords = []
                     st.rerun()
+        
+        # 手動調整時の学習データ保存処理を追加
+        if st.session_state.processing_step == 'manual_adjust' and len(st.session_state.manual_coords) == 2:
+            (x1, y1), (x2, y2) = st.session_state.manual_coords
+            
+            # プレビューサイズから元画像サイズに変換
+            scale_x = st.session_state.original_image.width / st.session_state.preview_image.width
+            scale_y = st.session_state.original_image.height / st.session_state.preview_image.height
+            
+            real_x1 = int(min(x1, x2) * scale_x)
+            real_y1 = int(min(y1, y2) * scale_y)
+            real_x2 = int(max(x1, x2) * scale_x)
+            real_y2 = int(max(y1, y2) * scale_y)
+            
+            manual_area = (real_x1, real_y1, real_x2, real_y2)
+            
+            # 学習データの保存
+            if validate_area(manual_area, st.session_state.original_image.width, st.session_state.original_image.height):
+                image_features = extract_image_features(st.session_state.original_image)
+                if image_features:
+                    save_learning_data(manual_area, image_features)
+                    st.success("学習データを保存しました！")
     
     # ステップ4: 塗りつぶしモード
     elif st.session_state.processing_step == 'fill_mode':
@@ -849,7 +964,7 @@ with st.sidebar:
     3. 必要に応じて**手動調整**または**塗りつぶし**
     4. **PDF生成**してダウンロード
     
-    ### ✨ 新機能 v1.5.4
+    ### ✨ 新機能 v1.5.5
     - ✅ **PDF生成修正**: 塗りつぶし後の図面領域切り取りを正しく適用
     - 🎯 **図面領域確定システム**: 帯の自動認識/手動修正で範囲を確定
     - 🔄 **排他的モード選択**: スポイトツールと範囲選択の完全分離
